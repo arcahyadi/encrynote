@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -50,6 +51,35 @@ void main() {
     sealedWatch.stop();
     final resealed = await crypto.unlock(sealed, localPassword);
     expect(resealed.revision, 2);
+
+    // Amended header authentication must hold on the target platform too.
+    final rewrapped = await crypto.rewrapPassword(resealed, 'new-pass-1234', 3);
+    final afterRewrap = await crypto.unlock(rewrapped, 'new-pass-1234');
+    expect(
+      afterRewrap.data.notes.single.markdown,
+      fixtureData.notes.single.markdown,
+    );
+    final recoveredAfterRewrap = await crypto.recover(
+      rewrapped,
+      fixtureRecovery.answers,
+    );
+    expect(
+      recoveredAfterRewrap.data.notes.single.markdown,
+      fixtureData.notes.single.markdown,
+    );
+
+    final header = jsonDecode(utf8.decode(rewrapped)) as Map<String, dynamic>;
+    final questions =
+        (header['recovery'] as Map<String, dynamic>)['questions']
+            as List<dynamic>;
+    questions[0] = 'Attacker prompt?';
+    final tampered = Uint8List.fromList(utf8.encode(jsonEncode(header)));
+    await expectLater(
+      crypto.unlock(tampered, 'new-pass-1234'),
+      throwsA(
+        isA<VaultException>().having((e) => e.code, 'code', FailureCode.format),
+      ),
+    );
 
     await expectLater(
       crypto.unlock(created.envelope, 'wrong-1234'),

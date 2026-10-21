@@ -71,7 +71,7 @@ AAD is a canonical JSON array of UTF-8 values, one domain per use:
 
 | Use | AAD array |
 | --- | --- |
-| Local payload | `["encrynote/local-payload", 1, "argon2id-aes256gcm", vaultIdHex]` |
+| Local payload | `["encrynote/local-payload", 1, "argon2id-aes256gcm", vaultIdHex, passwordSaltB64, recoverySaltB64, [q1,q2,q3], pwWrapNonceB64, pwWrapCiphertextB64, pwWrapTagB64, recWrapNonceB64, recWrapCiphertextB64, recWrapTagB64]` |
 | Password wrap | `["encrynote/password-wrap", 1, "argon2id-aes256gcm", vaultIdHex]` |
 | Recovery wrap | `["encrynote/recovery-wrap", 1, "argon2id-aes256gcm", vaultIdHex, [q1, q2, q3]]` |
 | Export payload (later) | `["encrynote/export-payload", 1, "argon2id-aes256gcm", exportIdHex]` |
@@ -82,6 +82,20 @@ password rewrap do not need the old password. The recovery AAD binds question
 order and text, so edited prompts only become authentic when the recovery wrap
 verifies.
 
+The payload AAD additionally authenticates every header field the writer
+retains on re-emit: both salts, the recovery question texts, and both wrappers'
+nonce/ciphertext/tag. Consequences:
+
+- Any edit to the recovery block (questions, recovery salt, or recovery wrap)
+  is detected on the password unlock path, not only on recovery.
+- `seal` and `rewrapPassword` decrypt the current payload with the supplied
+  data key before emitting. A mismatched envelope/key pair, or a tampered
+  retained header, fails with `FailureCode.format` instead of producing an
+  unopenable or unrecoverable vault.
+- Recovery still works after `rewrapPassword`, because only the password salt
+  and password wrap change; the payload is re-sealed under the amended AAD.
+
+
 ## Recovery answer encoding
 
 The three trimmed answers are hashed as a JSON array of strings
@@ -90,36 +104,50 @@ trimmed; capitalization and inner spaces are preserved. Password values are
 neither trimmed nor case-folded, and length is counted in grapheme clusters
 (`characters`).
 
+No Unicode normalization is applied to passwords or answers. Input is used
+exactly as typed, so the same password typed in NFC and NFD forms derives
+different keys; users must enter the same bytes they set. This is deliberate for
+v1 (normalizing would silently change user input and complicate cross-platform
+equality) and must be revisited before any feature that compares password text
+across devices.
+
 ## Measured results
+
+Fix round 1 (amended header-authentication code) re-ran the native checks; the
+numbers below are from the amended code.
 
 `flutter test integration_test/crypto_platform_test.dart -d macos` on macOS
 27.0.1 (arm64, debug build, 2026-10-22):
 
 | Operation | Time |
 | --- | --- |
-| `createVault` (2 Argon2id derivations + wraps + payload seal) | 193 ms |
-| `unlock` (1 Argon2id derivation) | 74 ms |
-| `recover` (1 Argon2id derivation) | 65 ms |
+| `createVault` (2 Argon2id derivations + wraps + payload seal) | 198 ms |
+| `unlock` (1 Argon2id derivation) | 75 ms |
+| `recover` (1 Argon2id derivation) | 72 ms |
 | `seal` (AES-GCM only, small payload) | < 1 ms |
 | Envelope size for the synthetic fixture | 1138 B |
 
 `flutter test integration_test/crypto_platform_test.dart -d emulator-5554`
-(Android 17 / API 37, arm64 emulator, debug build, first run after cold start):
+(Android 17 / API 37, arm64 emulator, debug build, amended code, two runs):
 
 | Operation | Time |
 | --- | --- |
-| `createVault` | 3815–9288 ms (two runs; includes JIT warm-up) |
-| `unlock` | 637–876 ms |
-| `recover` | 775–860 ms |
-| `seal` | 45–49 ms |
+| `createVault` | 7129–8423 ms (includes JIT warm-up) |
+| `unlock` | 2340–2479 ms |
+| `recover` | 1272–1836 ms |
+| `seal` | 128–250 ms |
 | Envelope size | 1138 B |
+
+The amended integration test also proves on-device: seal → reseal round-trip,
+`rewrapPassword` keeping notes, recovery still working after a password rewrap,
+and rejection (`FailureCode.format`) of tampered recovery questions.
 
 Round-trip, recovery-key equality, reseal and wrong-password rejection passed on
 both platforms.
 
 These numbers are single debug-build measurements on one machine, not a
 performance guarantee. Android debug builds run without AOT and the emulator is
-not a low-end device, so the ~0.8 s unlock figure is an upper-ish bound only.
+not a low-end device, so the unlock figure is an upper-ish bound only.
 Run the same integration test on a real low-end Android device before treating
 this profile as release-ready; if it is too slow there, change the profile
 explicitly (new documented v1 parameters) rather than silently.

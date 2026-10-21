@@ -16,6 +16,18 @@ Uint8List _withTamperedByte(Uint8List envelope, String base64Field) {
   return Uint8List.fromList(utf8.encode(jsonEncode(map)));
 }
 
+Uint8List _withTamperedRecovery(
+  Uint8List envelope,
+  void Function(Map<String, dynamic> recovery) tamper,
+) {
+  final map = jsonDecode(utf8.decode(envelope)) as Map<String, dynamic>;
+  tamper(map['recovery'] as Map<String, dynamic>);
+  return Uint8List.fromList(utf8.encode(jsonEncode(map)));
+}
+
+Matcher _rejectedAs(FailureCode code) =>
+    throwsA(isA<VaultException>().having((e) => e.code, 'code', code));
+
 void main() {
   final crypto = VaultCrypto();
 
@@ -202,6 +214,132 @@ void main() {
     await expectLater(
       crypto.recover(tamperedHeader, fixtureRecovery.answers),
       throwsA(isA<VaultException>()),
+    );
+  });
+
+  test('password path rejects tampered recovery questions', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final tampered = _withTamperedRecovery(created.envelope, (recovery) {
+      final questions = recovery['questions'] as List<dynamic>;
+      questions[0] = 'Attacker prompt?';
+    });
+    await expectLater(
+      crypto.unlock(tampered, localPassword),
+      _rejectedAs(FailureCode.format),
+    );
+  });
+
+  test('password path rejects a tampered recovery salt', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final tampered = _withTamperedRecovery(created.envelope, (recovery) {
+      final kdf = recovery['kdf'] as Map<String, dynamic>;
+      final salt = base64Decode(kdf['salt'] as String);
+      salt[0] ^= 0x01;
+      kdf['salt'] = base64Encode(salt);
+    });
+    await expectLater(
+      crypto.unlock(tampered, localPassword),
+      _rejectedAs(FailureCode.format),
+    );
+  });
+
+  test('password path rejects a tampered recovery wrap', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final tampered = _withTamperedRecovery(created.envelope, (recovery) {
+      final wrap = recovery['wrap'] as Map<String, dynamic>;
+      final tag = base64Decode(wrap['tag'] as String);
+      tag[0] ^= 0x01;
+      wrap['tag'] = base64Encode(tag);
+    });
+    await expectLater(
+      crypto.unlock(tampered, localPassword),
+      _rejectedAs(FailureCode.format),
+    );
+    await expectLater(
+      crypto.recover(tampered, fixtureRecovery.answers),
+      _rejectedAs(FailureCode.credentials),
+    );
+  });
+
+  test(
+    'seal and rewrap reject an envelope that does not match the key',
+    () async {
+      final first = await crypto.createVault(
+        localPassword,
+        fixtureRecovery,
+        fixtureData,
+      );
+      final second = await crypto.createVault(
+        'other-pass-1234',
+        fixtureRecovery,
+        fixtureData,
+      );
+      final firstUnlocked = await crypto.unlock(first.envelope, localPassword);
+      final mismatched = UnlockedVault(
+        envelope: second.envelope,
+        dataKey: firstUnlocked.dataKey,
+        data: firstUnlocked.data,
+        revision: firstUnlocked.revision,
+      );
+
+      await expectLater(
+        crypto.seal(mismatched, fixtureData, 2),
+        _rejectedAs(FailureCode.format),
+      );
+      await expectLater(
+        crypto.rewrapPassword(mismatched, 'new-pass-1234', 2),
+        _rejectedAs(FailureCode.format),
+      );
+
+      // The untouched second vault is still openable with its own password.
+      final stillValid = await crypto.unlock(
+        second.envelope,
+        'other-pass-1234',
+      );
+      expect(
+        stillValid.data.notes.single.markdown,
+        fixtureData.notes.single.markdown,
+      );
+    },
+  );
+
+  test('seal and rewrap fail closed on a tampered recovery header', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final unlocked = await crypto.unlock(created.envelope, localPassword);
+    final tampered = _withTamperedRecovery(created.envelope, (recovery) {
+      final questions = recovery['questions'] as List<dynamic>;
+      questions[1] = 'Attacker prompt?';
+    });
+    final tamperedVault = UnlockedVault(
+      envelope: tampered,
+      dataKey: unlocked.dataKey,
+      data: unlocked.data,
+      revision: unlocked.revision,
+    );
+
+    await expectLater(
+      crypto.seal(tamperedVault, fixtureData, 2),
+      _rejectedAs(FailureCode.format),
+    );
+    await expectLater(
+      crypto.rewrapPassword(tamperedVault, 'new-pass-1234', 2),
+      _rejectedAs(FailureCode.format),
     );
   });
 

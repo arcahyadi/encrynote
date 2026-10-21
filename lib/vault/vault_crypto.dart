@@ -66,7 +66,14 @@ class VaultCrypto {
       recoveryKey,
       header.recoveryWrapAad(),
     );
-    final payload = await _sealPayload(dataKey, header, data, 1);
+    final payload = await _sealPayload(
+      dataKey,
+      header,
+      passwordWrap,
+      recoveryWrap,
+      data,
+      1,
+    );
     final envelope = _encode(header, passwordWrap, recoveryWrap, payload);
 
     return UnlockedVault(
@@ -125,9 +132,12 @@ class VaultCrypto {
     int revision,
   ) async {
     final parsed = _parse(vault.envelope);
+    await _verifyKey(parsed, vault.dataKey);
     final payload = await _sealPayload(
       vault.dataKey,
       parsed.header,
+      parsed.passwordWrap,
+      parsed.recoveryWrap,
       data,
       revision,
     );
@@ -148,6 +158,7 @@ class VaultCrypto {
       throw const VaultException(FailureCode.credentials, 'password.length');
     }
     final parsed = _parse(vault.envelope);
+    await _verifyKey(parsed, vault.dataKey);
     final salt = _randomBytes(_saltLength);
     final key = await _deriveKey(newPassword, salt);
     final header = parsed.header.withPasswordSalt(salt);
@@ -159,6 +170,8 @@ class VaultCrypto {
     final payload = await _sealPayload(
       vault.dataKey,
       header,
+      passwordWrap,
+      parsed.recoveryWrap,
       vault.data,
       revision,
     );
@@ -169,7 +182,7 @@ class VaultCrypto {
     final plain = await _decrypt(
       parsed.payload,
       dataKey,
-      parsed.header.payloadAad(),
+      parsed.header.payloadAad(parsed.passwordWrap, parsed.recoveryWrap),
       FailureCode.format,
     );
     if (plain.length > maxPayloadBytes) {
@@ -204,6 +217,8 @@ class VaultCrypto {
   Future<_Sealed> _sealPayload(
     SecretKey dataKey,
     _Header header,
+    _Sealed passwordWrap,
+    _Sealed recoveryWrap,
     VaultData data,
     int revision,
   ) async {
@@ -222,9 +237,20 @@ class VaultCrypto {
       plain,
       secretKey: dataKey,
       nonce: _randomBytes(_nonceLength),
-      aad: header.payloadAad(),
+      aad: header.payloadAad(passwordWrap, recoveryWrap),
     );
     return _Sealed.fromBox(box);
+  }
+
+  /// Proves [dataKey] belongs to [parsed] before any re-emit; the payload AAD
+  /// also authenticates every retained header field and both wrappers.
+  Future<void> _verifyKey(_ParsedEnvelope parsed, SecretKey dataKey) async {
+    await _decrypt(
+      parsed.payload,
+      dataKey,
+      parsed.header.payloadAad(parsed.passwordWrap, parsed.recoveryWrap),
+      FailureCode.format,
+    );
   }
 
   Future<_Sealed> _wrap(
@@ -448,7 +474,23 @@ class _Header {
     questions: questions,
   );
 
-  List<int> payloadAad() => _aad([_domainPayload, _version, _suite, _hexId]);
+  /// Binds the public header and both wrappers to the payload, so no open or
+  /// re-emit path can accept a header the writer never authenticated.
+  List<int> payloadAad(_Sealed passwordWrap, _Sealed recoveryWrap) => _aad([
+    _domainPayload,
+    _version,
+    _suite,
+    _hexId,
+    base64Encode(passwordSalt),
+    base64Encode(recoverySalt),
+    questions,
+    passwordWrap.nonceBase64,
+    passwordWrap.ciphertextBase64,
+    passwordWrap.tagBase64,
+    recoveryWrap.nonceBase64,
+    recoveryWrap.ciphertextBase64,
+    recoveryWrap.tagBase64,
+  ]);
 
   List<int> passwordWrapAad() =>
       _aad([_domainPasswordWrap, _version, _suite, _hexId]);
@@ -485,10 +527,14 @@ class _Sealed {
   final Uint8List ciphertext;
   final Uint8List tag;
 
+  String get nonceBase64 => base64Encode(nonce);
+  String get ciphertextBase64 => base64Encode(ciphertext);
+  String get tagBase64 => base64Encode(tag);
+
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'nonce': base64Encode(nonce),
-    'ciphertext': base64Encode(ciphertext),
-    'tag': base64Encode(tag),
+    'nonce': nonceBase64,
+    'ciphertext': ciphertextBase64,
+    'tag': tagBase64,
   };
 
   static Uint8List _decode(Object? value, int? length, String field) {
