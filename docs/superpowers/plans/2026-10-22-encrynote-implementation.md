@@ -38,7 +38,7 @@
 ## Steps
 
 - [x] Task 1: Model vault dan kriptografi lokal yang dapat diuji.
-- [ ] Task 2: Penyimpanan ciphertext dengan commit dan pemulihan yang jelas.
+- [x] Task 2: Penyimpanan ciphertext dengan commit dan pemulihan yang jelas.
 - [ ] Task 3: Sesi, autosave, recovery, dan pengurutan perubahan.
 - [ ] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
 - [ ] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
@@ -103,7 +103,7 @@ await expectLater(crypto.unlock(created.envelope, 'wrong-1234'), throwsA(isA<Vau
 
 **Interfaces:** `VaultStore({required Directory directory, required NativeBridge native})`; `read() -> Future<Uint8List?>`; `commit(Uint8List ciphertext) -> Future<void>`. `NativeBridge` memakai channel `encrynote/platform`, menghasilkan `commitVault({required String stagedPath, required String activePath, required String previousPath}) -> Future<void>`. Fake bridge meniru kontrak commit dan dapat menggagalkan satu tahap untuk test.
 
-- [ ] **Step 1:** Tulis test gagal `staged bytes are encrypted`, `failure keeps last committed vault`, `missing primary with previous restores a candidate`, `truncated primary is not a new install`, `wrong password never tries previous wrappers`, serta pengujian putus pada tiap tahap:
+- [x] **Step 1:** Tulis test gagal `staged bytes are encrypted`, `failure keeps last committed vault`, `missing primary with previous restores a candidate`, `truncated primary is not a new install`, `wrong password never tries previous wrappers`, serta pengujian putus pada tiap tahap:
 
 ```dart
 await store.commit(created.envelope);
@@ -112,11 +112,11 @@ await expectLater(store.commit(updatedEnvelope), throwsA(isA<VaultException>()))
 expect(await store.read(), orderedEquals(created.envelope));
 ```
 
-- [ ] **Step 2:** Jalankan `flutter test test/vault/vault_store_test.dart` dan periksa kegagalan yang diharapkan.
-- [ ] **Step 3:** Implementasikan `vault.enc`, `vault.previous`, `vault.next`. Staging hanya ciphertext dan di-flush sebelum bridge melakukan backup/penggantian atomik serta sync metadata sesuai OS. Backup dipertahankan sampai commit baru selesai. Saat primary ada, kegagalan autentikasi bukan izin mencoba generasi credential lama. File rusak menghasilkan error; `null` hanya berarti belum ada file vault/calon pemulihan sama sekali.
-- [ ] **Step 4:** Implementasikan handler commit native menggunakan operasi filesystem bawaan, di luar main thread. Ketiga path harus canonical, memiliki parent sama dalam direktori privat aplikasi yang dihitung OS, dan basename tepat `vault.next`, `vault.enc`, `vault.previous`; jangan menerima path impor sebagai tujuan commit. Pisahkan hasil penulisan buffer dari commit point. Uji tahap native pada kedua platform dan dokumentasikan keterbatasan durability yang benar-benar teramati.
-- [ ] **Step 5:** Jalankan unit test dan `flutter test integration_test/storage_platform_test.dart -d macos` serta Android saat tersedia; hasilnya harus mempertahankan vault lama atau memberi error non-destruktif, tidak pernah membuat vault kosong.
-- [ ] **Step 6:** Commit: `feat: persist encrypted vault snapshots safely`.
+- [x] **Step 2:** Jalankan `flutter test test/vault/vault_store_test.dart` dan periksa kegagalan yang diharapkan.
+- [x] **Step 3:** Implementasikan `vault.enc`, `vault.previous`, `vault.next`. Staging hanya ciphertext dan di-flush sebelum bridge melakukan backup/penggantian atomik serta sync metadata sesuai OS. Backup dipertahankan sampai commit baru selesai. Saat primary ada, kegagalan autentikasi bukan izin mencoba generasi credential lama. File rusak menghasilkan error; `null` hanya berarti belum ada file vault/calon pemulihan sama sekali.
+- [x] **Step 4:** Implementasikan handler commit native menggunakan operasi filesystem bawaan, di luar main thread. Ketiga path harus canonical, memiliki parent sama dalam direktori privat aplikasi yang dihitung OS, dan basename tepat `vault.next`, `vault.enc`, `vault.previous`; jangan menerima path impor sebagai tujuan commit. Pisahkan hasil penulisan buffer dari commit point. Uji tahap native pada kedua platform dan dokumentasikan keterbatasan durability yang benar-benar teramati.
+- [x] **Step 5:** Jalankan unit test dan `flutter test integration_test/storage_platform_test.dart -d macos` serta Android saat tersedia; hasilnya harus mempertahankan vault lama atau memberi error non-destruktif, tidak pernah membuat vault kosong.
+- [x] **Step 6:** Commit: `feat: persist encrypted vault snapshots safely`.
 
 ### Task 3: Sesi dan urutan perubahan
 
