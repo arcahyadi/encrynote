@@ -30,9 +30,11 @@ readable by `c442602`.
 `createVault`, `unlock`, `recover`, `seal`, and `rewrapPassword` each perform
 their whole job in one helper isolate (`Isolate.run`): envelope JSON/base64,
 Argon2id, AES-GCM, and payload serialization all happen off the UI isolate.
-Only byte lists, strings, and `VaultData` cross the isolate boundary; the
-cipher, RNG, and key objects are created inside it. `readRecoveryQuestions`
-stays synchronous because it only parses the public header and runs no KDF.
+Only byte lists, strings, `VaultData`, the parsed header, and a small result
+record cross the isolate boundary; the cipher, RNG, and key objects are created
+inside it. `readRecoveryQuestions` stays synchronous because it runs no KDF and
+only needs the public header, although the current parser still decodes the
+whole envelope (see the limit below).
 
 Consequence: these calls are async and their wall-clock cost is unchanged or
 slightly higher (one isolate spawn per call, ~67 ms on the Android emulator),
@@ -40,11 +42,13 @@ but the UI isolate is not blocked. Measured worst-case event-loop stall during
 a 4 MiB `seal` dropped from 255 ms to 3–8 ms on macOS and to 43–59 ms on the
 Android emulator.
 
-Known limit: `readRecoveryQuestions` is synchronous by contract and decodes the
-whole envelope JSON (not the payload ciphertext) on the caller's isolate; on a
-~9.6 MB envelope that measured ~24 ms of main-isolate work on macOS. It is
-called before unlock on a screen with no frame-critical work, so this is
-accepted for v1 rather than making the API async.
+Known limit: `readRecoveryQuestions` is synchronous by contract and runs no KDF,
+but the current parser decodes the **whole** envelope, including base64-decoding
+the sealed payload ciphertext into memory, before returning the three question
+strings. On a ~9.6 MB envelope that measured 22 ms of wall time and a 23 ms
+caller-isolate stall on macOS. It is called before unlock on a screen with no
+frame-critical work, so this is accepted for v1 rather than making the API
+async or adding a questions-only parser path.
 
 ## Suite
 
@@ -139,10 +143,25 @@ nonce/ciphertext/tag. Consequences:
 - **Both open paths authenticate the whole header.** `unlock` and `recover`
   each verify the same payload AAD, which covers the password salt, the password
   wrap, the recovery salt, the recovery wrap, and the question texts. Damage to
-  either block therefore fails **both** paths with `FailureCode.format`.
+  either block therefore makes **both** paths fail; the reported code differs
+  by which check trips first:
+  - The damaged block's own unwrap fails as `FailureCode.credentials`
+    (password-wrap damage → `unlock` reports `credentials`; recovery-wrap
+    damage → `recover` reports `credentials`).
+  - The other path gets past its unwrap and then fails the payload AAD as
+    `FailureCode.format` (password-wrap damage → `recover` reports `format`;
+    recovery-wrap damage → `unlock` reports `format`).
+  - Recovery-question text or recovery-salt damage is caught by the payload AAD
+    only, so `unlock` reports `format` and `recover` reports `credentials`
+    (its recovery wrap no longer verifies under the changed AAD). Password-salt
+    damage behaves like password-wrap damage: `unlock` reports `credentials`
+    (the derived key no longer matches) and `recover` reports `format`.
+  - Payload-ciphertext damage reports `format` on both paths.
+
   Recovery questions are for forgotten credentials, not for repairing a damaged
   or tampered password block: there is no recovery route back into an envelope
-  whose header authentication fails.
+  whose header authentication fails, and this format offers no repair path for
+  a corrupt or tampered envelope.
 
 
 ## Recovery answer encoding
