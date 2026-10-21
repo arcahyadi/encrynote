@@ -37,7 +37,7 @@
 
 ## Steps
 
-- [ ] Task 1: Model vault dan kriptografi lokal yang dapat diuji.
+- [x] Task 1: Model vault dan kriptografi lokal yang dapat diuji.
 - [ ] Task 2: Penyimpanan ciphertext dengan commit dan pemulihan yang jelas.
 - [ ] Task 3: Sesi, autosave, recovery, dan pengurutan perubahan.
 - [ ] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
@@ -75,9 +75,9 @@ Batas awal yang harus sama pada pembaca/penulis kedua platform: payload JSON pla
 
 **Interfaces:** `bool validPassword(String value)`; `VaultCrypto.createVault(String password, RecoveryConfig recovery, VaultData data) -> Future<UnlockedVault>`; `unlock(Uint8List envelope, String password) -> Future<UnlockedVault>`; `recover(Uint8List envelope, List<String> answers) -> Future<UnlockedVault>`; `readRecoveryQuestions(Uint8List envelope) -> List<String>`; `seal(UnlockedVault vault, VaultData data, int revision) -> Future<Uint8List>`; `rewrapPassword(UnlockedVault vault, String newPassword, int revision) -> Future<Uint8List>`. `readRecoveryQuestions` memvalidasi schema/batas header lokal tanpa KDF; prompt baru terbukti autentik saat wrapper berhasil diverifikasi. Fixture file produces `fixtureData` (one synthetic note), `fixtureRecovery` (three custom prompts/answers) and `localPassword = 'local-1234'`. Later tasks use these exact names.
 
-- [ ] **Step 1:** Hanya setelah izin eksekusi, periksa isi/ignore proyek lalu, jika folder ini masih belum Git, `git init -b main`; verifikasi root Git sama dengan folder proyek. Jika keadaan checkout sudah berubah, jangan reset/discard atau mengganti branch pengguna. Jangan membuat worktree atau remote.
-- [ ] **Step 2:** Catat baseline file proyek yang memang ditinjau dengan commit lokal `chore: record Flutter baseline and approved design`; jangan memasukkan build/cache/IDE, local.properties, key, atau secret.
-- [ ] **Step 3:** Tambah test gagal `password and recovery unlock the same note`, `export profile cannot be parsed as local`, `wrong answers reveal no partial success`, `tampered header or tag is rejected`, `writer never exceeds reader limits`, dan assertions berikut:
+- [x] **Step 1:** Hanya setelah izin eksekusi, periksa isi/ignore proyek lalu, jika folder ini masih belum Git, `git init -b main`; verifikasi root Git sama dengan folder proyek. Jika keadaan checkout sudah berubah, jangan reset/discard atau mengganti branch pengguna. Jangan membuat worktree atau remote.
+- [x] **Step 2:** Catat baseline file proyek yang memang ditinjau dengan commit lokal `chore: record Flutter baseline and approved design`; jangan memasukkan build/cache/IDE, local.properties, key, atau secret.
+- [x] **Step 3:** Tambah test gagal `password and recovery unlock the same note`, `export profile cannot be parsed as local`, `wrong answers reveal no partial success`, `tampered header or tag is rejected`, `writer never exceeds reader limits`, dan assertions berikut:
 
 ```dart
 expect(validPassword('1234567'), isFalse);
@@ -92,10 +92,10 @@ await expectLater(crypto.unlock(created.envelope, 'wrong-1234'), throwsA(isA<Vau
 ```
 
   Tambahkan assertions password tidak di-trim, jawaban hanya trim tepi dan tetap case-sensitive, serta pasangan jawaban yang bisa bertabrakan jika di-concat tidak menghasilkan key sama. Gunakan JSON array untuk gabungan jawaban. Uji ciphertext tidak memuat marker judul/isi/plaintext fixture, nonce berbeda setiap seal, dan penolakan profil KDF/header oversized sebelum derivasi.
-- [ ] **Step 4:** Jalankan `flutter test test/vault/vault_crypto_test.dart`; pastikan gagal karena kontrak yang belum diimplementasikan, bukan masalah environment yang tidak berkaitan.
-- [ ] **Step 5:** Implementasikan tipe dan API minimum, tambah `cryptography: ^2.9.0` serta deklarasi langsung `characters: ^1.4.1` berdasarkan lockfile yang sudah ada. Jalankan KDF di isolate agar UI tidak terblokir; jangan mengimplementasikan primitif kriptografi sendiri. Tambah `integration_test` dari Flutter SDK untuk test native.
-- [ ] **Step 6:** Jalankan ulang unit test sampai lulus. Sesudah device tersedia, jalankan `flutter test integration_test/crypto_platform_test.dart -d macos` dan `-d <android-device-id>`; catat hasil round-trip/profil nyata di `docs/security/crypto-profile.md`. Jika dukungan/profil gagal, berhenti dan laporkan, bukan menurunkan keamanan diam-diam.
-- [ ] **Step 7:** Commit hanya file Task 1 yang sudah lolos pemeriksaan: `feat: add authenticated local vault encryption`.
+- [x] **Step 4:** Jalankan `flutter test test/vault/vault_crypto_test.dart`; pastikan gagal karena kontrak yang belum diimplementasikan, bukan masalah environment yang tidak berkaitan.
+- [x] **Step 5:** Implementasikan tipe dan API minimum, tambah `cryptography: ^2.9.0` serta deklarasi langsung `characters: ^1.4.1` berdasarkan lockfile yang sudah ada. Jalankan KDF di isolate agar UI tidak terblokir; jangan mengimplementasikan primitif kriptografi sendiri. Tambah `integration_test` dari Flutter SDK untuk test native.
+- [x] **Step 6:** Jalankan ulang unit test sampai lulus. Sesudah device tersedia, jalankan `flutter test integration_test/crypto_platform_test.dart -d macos` dan `-d <android-device-id>`; catat hasil round-trip/profil nyata di `docs/security/crypto-profile.md`. Jika dukungan/profil gagal, berhenti dan laporkan, bukan menurunkan keamanan diam-diam.
+- [x] **Step 7:** Commit hanya file Task 1 yang sudah lolos pemeriksaan: `feat: add authenticated local vault encryption`.
 
 ### Task 2: Commit ciphertext dan pemulihan disk
 
