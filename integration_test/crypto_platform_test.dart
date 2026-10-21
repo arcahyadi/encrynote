@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -86,6 +87,38 @@ void main() {
       throwsA(isA<VaultException>()),
     );
 
+    // Large-payload work must also stay off the main isolate on this platform.
+    final largeNote = Note(
+      id: 'dddddddddddddddddddddddddddddddd',
+      title: 'large',
+      markdown: 'z' * (4 * 1024 * 1024),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+    );
+    var lastTick = DateTime.now();
+    var maxStallMs = 0;
+    var ticks = 0;
+    final timer = Timer.periodic(const Duration(milliseconds: 5), (_) {
+      final now = DateTime.now();
+      final gap = now.difference(lastTick).inMilliseconds;
+      if (gap > maxStallMs) maxStallMs = gap;
+      lastTick = now;
+      ticks++;
+    });
+    final largeWatch = Stopwatch()..start();
+    final largeSealed = await crypto.seal(
+      resealed,
+      VaultData(notes: [largeNote]),
+      3,
+    );
+    largeWatch.stop();
+    final largeReopened = await crypto.unlock(largeSealed, localPassword);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    timer.cancel();
+    expect(largeReopened.data.notes.single.markdown.length, 4 * 1024 * 1024);
+    expect(ticks, greaterThan(3), reason: 'timer never ran');
+    expect(maxStallMs, lessThan(100), reason: 'stalled $maxStallMs ms');
+
     // Recorded in docs/security/crypto-profile.md.
     // ignore: avoid_print
     print(
@@ -93,7 +126,9 @@ void main() {
       'unlock=${unlockWatch.elapsedMilliseconds}ms '
       'recover=${recoverWatch.elapsedMilliseconds}ms '
       'seal=${sealedWatch.elapsedMilliseconds}ms '
-      'envelope=${created.envelope.length}B',
+      'envelope=${created.envelope.length}B '
+      'largeSeal=${largeWatch.elapsedMilliseconds}ms '
+      'maxStall=${maxStallMs}ms',
     );
     expect(created.envelope, isA<Uint8List>());
   });

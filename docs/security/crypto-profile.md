@@ -4,6 +4,48 @@ Status: implemented and exercised on macOS and an Android emulator (Task 1).
 Measured on a real low-end Android device: **Not run**, so the v1 Argon2id
 profile is not yet approved for release.
 
+## Pre-release compatibility (read before persisting a vault)
+
+This is an unpublished, pre-release format. The v1 local layout changed after
+commit `c442602` (fix `75570f0` widened the payload AAD); envelopes written by
+`c442602` are **not** readable by current code and current envelopes are not
+readable by `c442602`.
+
+- There are no user vaults and no migration path. Any test vault, fixture
+  envelope, or developer device copy captured at or before `c442602` must be
+  **recreated**, not migrated.
+- Public compatibility across builds is not promised before the first release.
+  Later tasks must not assume that an envelope written by an earlier build can
+  be opened by a later one.
+- `version` stays `1` by project decision (no user data exists to protect), so
+  an old envelope fails as `FailureCode.format` on authentication. Treat that
+  as "incompatible pre-release build" for any envelope known to predate
+  `75570f0`, not as evidence that the vault is corrupt. Do not delete or
+  overwrite a vault on that basis without user confirmation.
+- From the first public release onward, any change to the envelope layout or
+  AAD must bump `version` so old files fail as `FailureCode.unsupported`.
+
+## Where crypto work runs
+
+`createVault`, `unlock`, `recover`, `seal`, and `rewrapPassword` each perform
+their whole job in one helper isolate (`Isolate.run`): envelope JSON/base64,
+Argon2id, AES-GCM, and payload serialization all happen off the UI isolate.
+Only byte lists, strings, and `VaultData` cross the isolate boundary; the
+cipher, RNG, and key objects are created inside it. `readRecoveryQuestions`
+stays synchronous because it only parses the public header and runs no KDF.
+
+Consequence: these calls are async and their wall-clock cost is unchanged or
+slightly higher (one isolate spawn per call, ~67 ms on the Android emulator),
+but the UI isolate is not blocked. Measured worst-case event-loop stall during
+a 4 MiB `seal` dropped from 255 ms to 3–8 ms on macOS and to 43–59 ms on the
+Android emulator.
+
+Known limit: `readRecoveryQuestions` is synchronous by contract and decodes the
+whole envelope JSON (not the payload ciphertext) on the caller's isolate; on a
+~9.6 MB envelope that measured ~24 ms of main-isolate work on macOS. It is
+called before unlock on a screen with no frame-critical work, so this is
+accepted for v1 rather than making the API async.
+
 ## Suite
 
 | Item | v1 value |
@@ -16,7 +58,7 @@ profile is not yet approved for release.
 | KDF salt | 16 random bytes per wrapper (separate salt for password and recovery) |
 | AEAD | AES-256-GCM, 32-byte key, 12-byte random nonce per encryption, 16-byte tag |
 | Data key | 32 random bytes, generated per vault |
-| Randomness | `dart:math` `Random.secure()` |
+| Randomness | `dart:math` `Random.secure()` (per call; no seeded RNG in production) |
 
 The parser accepts only this profile. Any other `kdf` value, version, or suite
 is rejected with `FailureCode.unsupported` before a KDF is run. Parameters are
@@ -94,6 +136,13 @@ nonce/ciphertext/tag. Consequences:
   unopenable or unrecoverable vault.
 - Recovery still works after `rewrapPassword`, because only the password salt
   and password wrap change; the payload is re-sealed under the amended AAD.
+- **Both open paths authenticate the whole header.** `unlock` and `recover`
+  each verify the same payload AAD, which covers the password salt, the password
+  wrap, the recovery salt, the recovery wrap, and the question texts. Damage to
+  either block therefore fails **both** paths with `FailureCode.format`.
+  Recovery questions are for forgotten credentials, not for repairing a damaged
+  or tampered password block: there is no recovery route back into an envelope
+  whose header authentication fails.
 
 
 ## Recovery answer encoding
@@ -113,7 +162,7 @@ across devices.
 
 ## Measured results
 
-Fix round 1 (amended header-authentication code) re-ran the native checks; the
+Fix round 2 (single-isolate-per-operation code) re-ran the native checks; the
 numbers below are from the amended code.
 
 `flutter test integration_test/crypto_platform_test.dart -d macos` on macOS
@@ -121,10 +170,12 @@ numbers below are from the amended code.
 
 | Operation | Time |
 | --- | --- |
-| `createVault` (2 Argon2id derivations + wraps + payload seal) | 198 ms |
-| `unlock` (1 Argon2id derivation) | 75 ms |
-| `recover` (1 Argon2id derivation) | 72 ms |
-| `seal` (AES-GCM only, small payload) | < 1 ms |
+| `createVault` (2 Argon2id derivations + wraps + payload seal) | 200 ms |
+| `unlock` (1 Argon2id derivation) | 81 ms |
+| `recover` (1 Argon2id derivation) | 66 ms |
+| `seal` (small payload) | < 1 ms |
+| `seal` with a 4 MiB note (includes key verify + reseal) | 244 ms |
+| Longest event-loop stall during that 4 MiB seal | 8 ms |
 | Envelope size for the synthetic fixture | 1138 B |
 
 `flutter test integration_test/crypto_platform_test.dart -d emulator-5554`
@@ -132,15 +183,22 @@ numbers below are from the amended code.
 
 | Operation | Time |
 | --- | --- |
-| `createVault` | 7129–8423 ms (includes JIT warm-up) |
-| `unlock` | 2340–2479 ms |
-| `recover` | 1272–1836 ms |
-| `seal` | 128–250 ms |
+| `createVault` | 2742–4000 ms (includes JIT warm-up) |
+| `unlock` | 406–1072 ms |
+| `recover` | 364–558 ms |
+| `seal` (small payload) | 166–288 ms |
+| `seal` with a 4 MiB note | 1192–2569 ms |
+| Longest event-loop stall during that 4 MiB seal | 43–59 ms |
 | Envelope size | 1138 B |
+
+Desktop measured stalls at other payload sizes on the same machine (2 ms
+sampling timer): 1 MiB → 4 ms, 4 MiB → 3 ms, 7 MiB → 5 ms. Before the isolate
+offload the same 4 MiB seal stalled the loop for 255 ms.
 
 The amended integration test also proves on-device: seal → reseal round-trip,
 `rewrapPassword` keeping notes, recovery still working after a password rewrap,
-and rejection (`FailureCode.format`) of tampered recovery questions.
+rejection (`FailureCode.format`) of tampered recovery questions, and the
+large-payload responsiveness bound.
 
 Round-trip, recovery-key equality, reseal and wrong-password rejection passed on
 both platforms.

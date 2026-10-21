@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -514,6 +515,85 @@ void main() {
     expect(sealed.length, lessThan(16 * 1024 * 1024));
     final reopened = await crypto.unlock(sealed, localPassword);
     expect(reopened.data.notes.single.markdown.length, 1024 * 1024);
+  });
+
+  test('damaged password block also blocks the recovery path', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final header =
+        jsonDecode(utf8.decode(created.envelope)) as Map<String, dynamic>;
+    final wrap = header['passwordWrap'] as Map<String, dynamic>;
+    final tag = base64Decode(wrap['tag'] as String);
+    tag[0] ^= 0x01;
+    wrap['tag'] = base64Encode(tag);
+    final damaged = Uint8List.fromList(utf8.encode(jsonEncode(header)));
+
+    // Both open paths authenticate the whole header, so neither can open it.
+    await expectLater(
+      crypto.unlock(damaged, localPassword),
+      _rejectedAs(FailureCode.credentials),
+    );
+    await expectLater(
+      crypto.recover(damaged, fixtureRecovery.answers),
+      _rejectedAs(FailureCode.format),
+    );
+    // The original envelope is untouched by the rejected calls.
+    final intact = await crypto.unlock(created.envelope, localPassword);
+    expect(
+      intact.data.notes.single.markdown,
+      fixtureData.notes.single.markdown,
+    );
+  });
+
+  test('large payload work does not block the event loop', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final unlocked = await crypto.unlock(created.envelope, localPassword);
+    final largeNote = Note(
+      id: 'dddddddddddddddddddddddddddddddd',
+      title: 'large',
+      markdown: 'z' * (4 * 1024 * 1024),
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+    );
+    final largeData = VaultData(notes: [largeNote]);
+
+    // Longest single event-loop stall while seal/verify encrypt+decrypt ~8 MiB.
+    var lastTick = DateTime.now();
+    var maxStallMs = 0;
+    final ticks = <int>[];
+    final timer = Timer.periodic(const Duration(milliseconds: 5), (_) {
+      final now = DateTime.now();
+      final gap = now.difference(lastTick).inMilliseconds;
+      ticks.add(gap);
+      if (gap > maxStallMs) maxStallMs = gap;
+      lastTick = now;
+    });
+    final sealed = await crypto.seal(unlocked, largeData, 2);
+    final reopened = await crypto.unlock(sealed, localPassword);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    timer.cancel();
+
+    expect(ticks.length, greaterThan(3), reason: 'timer never ran');
+    expect(
+      maxStallMs,
+      lessThan(100),
+      reason: 'event loop stalled $maxStallMs ms',
+    );
+    expect(reopened.data.notes.single.markdown.length, 4 * 1024 * 1024);
+
+    // Tamper checks still hold through the isolated payload work.
+    final tampered = _withTamperedByte(sealed, 'tag');
+    await expectLater(
+      crypto.unlock(tampered, localPassword),
+      _rejectedAs(FailureCode.format),
+    );
   });
 
   test('vault types enforce the documented format', () {
