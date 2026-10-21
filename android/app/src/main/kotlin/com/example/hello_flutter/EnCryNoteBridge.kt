@@ -17,16 +17,21 @@ import java.util.concurrent.Executors
  *
  * Commit point: the staged ciphertext is renamed over the active file, the new
  * active file is fsynced, and the parent directory is fsynced. Success is only
- * reported after all three. The previous generation is kept as the recovery
- * candidate for an interrupted replacement.
+ * reported after all three.
+ *
+ * Failure semantics: any failure after the active file was moved puts the
+ * previous generation back, so a failed commit leaves the old vault active and
+ * a caller that reports "not saved" tells the truth. If that rollback itself
+ * fails, the active generation is genuinely unknown and the call reports
+ * `commit.uncertain` rather than claiming either outcome.
  */
 class EnCryNoteBridge(private val context: Context) : MethodChannel.MethodCallHandler {
 
     companion object {
         private const val CHANNEL = "encrynote/platform"
-        private val STAGED = "vault.next"
-        private val ACTIVE = "vault.enc"
-        private val PREVIOUS = "vault.previous"
+        private const val STAGED = "vault.next"
+        private const val ACTIVE = "vault.enc"
+        private const val PREVIOUS = "vault.previous"
 
         fun register(messenger: BinaryMessenger, context: Context) {
             val channel = MethodChannel(messenger, CHANNEL)
@@ -57,9 +62,9 @@ class EnCryNoteBridge(private val context: Context) : MethodChannel.MethodCallHa
                 commit(stagedPath, activePath, previousPath)
                 null
             } catch (error: CommitFailure) {
-                error.message ?: "commit.failed"
+                error.message ?: "commit.uncertain"
             } catch (error: Exception) {
-                error.message ?: "commit.failed"
+                "commit.uncertain"
             }
             // A MethodChannel result must be delivered on the platform thread.
             main.post {
@@ -72,34 +77,69 @@ class EnCryNoteBridge(private val context: Context) : MethodChannel.MethodCallHa
     private class CommitFailure(message: String) : Exception(message)
 
     private fun commit(stagedPath: String, activePath: String, previousPath: String) {
-        val directory = context.filesDir.canonicalFile
-        val staged = checkedPath(stagedPath, directory, STAGED)
-        val active = checkedPath(activePath, directory, ACTIVE)
-        val previous = checkedPath(previousPath, directory, PREVIOUS)
+        val root = context.filesDir.canonicalFile
+        val staged = checkedPath(stagedPath, root, STAGED)
+        val active = checkedPath(activePath, root, ACTIVE)
+        val previous = checkedPath(previousPath, root, PREVIOUS)
 
+        // All three must share one parent; the vault is one directory, not a set
+        // of files that may be split across directories.
+        val parent = active.parentFile!!
+        if (staged.parentFile != parent || previous.parentFile != parent) {
+            throw CommitFailure("commit.path")
+        }
         if (!staged.isFile) throw CommitFailure("commit.staged")
 
-        // Retire the current generation first; the active file still holds the
-        // same bytes, so an interruption here never loses the only copy.
-        if (active.exists() && !active.renameTo(previous)) {
+        val hadActive = active.exists()
+        if (hadActive && !active.renameTo(previous)) {
             throw CommitFailure("commit.backup")
         }
-        syncDirectory(active.parentFile!!)
 
-        if (!staged.renameTo(active)) throw CommitFailure("commit.replace")
-        syncFile(active)
-        syncDirectory(active.parentFile!!)
+        try {
+            syncDirectory(parent)
+            if (!staged.renameTo(active)) throw CommitFailure("commit.replace")
+            syncFile(active)
+            syncDirectory(parent)
+        } catch (error: Exception) {
+            val failure = error as? CommitFailure ?: CommitFailure("commit.sync")
+            rollback(staged, active, previous, hadActive)
+            throw failure
+        }
     }
 
     /**
-     * Resolves [path] and requires the fixed basename plus the OS-provided
-     * private directory as its exact parent. Import/export locations are
-     * outside that directory, so they can never become a commit target.
+     * Restores the previous generation after a failed commit. Leaving the new
+     * generation active would make a reported failure a lie, and for a password
+     * change it would leave the on-disk credentials different from the ones the
+     * caller believes are active.
      */
-    private fun checkedPath(path: String, base: File, expectedName: String): File {
+    private fun rollback(staged: File, active: File, previous: File, hadActive: Boolean) {
+        if (active.exists() && !active.renameTo(staged)) {
+            throw CommitFailure("commit.uncertain")
+        }
+        if (hadActive && !previous.renameTo(active)) {
+            throw CommitFailure("commit.uncertain")
+        }
+        // Best effort: if this sync fails the old bytes are still active, which
+        // is the state the caller reports.
+        try {
+            syncDirectory(active.parentFile!!)
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Resolves [path] and requires the fixed basename plus a canonical parent
+     * that is the private root or a directory inside it. Import/export
+     * locations are outside that root, and a symlink that resolves outside it
+     * is rejected, so neither can become a commit target.
+     */
+    private fun checkedPath(path: String, root: File, expectedName: String): File {
         val file = File(path).canonicalFile
         if (file.name != expectedName) throw CommitFailure("commit.path")
-        if (file.parentFile != base) throw CommitFailure("commit.path")
+        val parent = file.parentFile ?: throw CommitFailure("commit.path")
+        val inside = parent == root || parent.path.startsWith(root.path + File.separator)
+        if (!inside) throw CommitFailure("commit.path")
         return file
     }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -113,6 +114,90 @@ void main() {
     expect(await store.read(), orderedEquals(created.envelope));
   });
 
+  test('a read during a replacement never returns the older generation', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final updated = await crypto.seal(created, fixtureData, 2);
+    await store.commit(created.envelope);
+
+    // Deterministic M-1 regression. A read is started first and held open inside
+    // the store; a commit requested afterwards must queue behind it instead of
+    // reaching the window where vault.enc has moved to vault.previous. Without
+    // the shared queue the read resumes in that window and silently returns the
+    // older generation.
+    final gateEntered = Completer<void>();
+    final gateRelease = Completer<void>();
+    var gateCalls = 0;
+    store.debugReadGate = () async {
+      if (gateCalls++ > 0) return;
+      gateEntered.complete();
+      await gateRelease.future;
+    };
+
+    final readResult = store.read();
+    await gateEntered.future;
+
+    final commitsBefore = native.commitCount;
+    final commitResult = store.commit(updated);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(
+      native.commitCount,
+      commitsBefore,
+      reason: 'the commit must queue behind the in-flight read',
+    );
+
+    gateRelease.complete();
+    expect(await readResult, orderedEquals(created.envelope));
+    await commitResult;
+    expect(await store.read(), orderedEquals(updated));
+  });
+
+  test('a read that starts mid-replacement waits for the replacement', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final updated = await crypto.seal(created, fixtureData, 2);
+    await store.commit(created.envelope);
+
+    // Hold the commit in the window where vault.enc is gone and the staged file
+    // has not been renamed yet, then read: the read must wait and see the new
+    // generation, never the previous one.
+    native.holdAt = CommitStage.backupSync;
+    final commitResult = store.commit(updated);
+    await native.entered.future;
+    expect(await file('vault.enc').exists(), isFalse);
+
+    final readResult = store.read();
+    native.release();
+    await commitResult;
+
+    expect(await readResult, orderedEquals(updated));
+  });
+
+  test('a read queued after a commit sees that commit', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    final updated = await crypto.seal(created, fixtureData, 2);
+    await store.commit(created.envelope);
+
+    native.holdAt = CommitStage.fileSync;
+    final commitResult = store.commit(updated);
+    await native.entered.future;
+    final readResult = store.read();
+    native.release();
+    await commitResult;
+
+    expect(await readResult, orderedEquals(updated));
+  });
+
   test('truncated primary is not a new install', () async {
     final created = await crypto.createVault(
       localPassword,
@@ -170,7 +255,77 @@ void main() {
   });
 
   for (final stage in CommitStage.values) {
-    test('commit failure at ${stage.name} never leaves an empty vault', () async {
+    test(
+      'commit failure at ${stage.name} leaves the old vault active',
+      () async {
+        final created = await crypto.createVault(
+          localPassword,
+          fixtureRecovery,
+          fixtureData,
+        );
+        final updated = await crypto.seal(created, fixtureData, 2);
+        await store.commit(created.envelope);
+
+        native.failAt = stage;
+        await expectLater(
+          store.commit(updated),
+          throwsA(isA<VaultException>()),
+        );
+
+        // Every stage, including the ones after the replacement, must put the
+        // previous generation back rather than leave a failed commit half-applied.
+        expect(await store.read(), orderedEquals(created.envelope));
+        expect(
+          await file('vault.enc').readAsBytes(),
+          orderedEquals(created.envelope),
+        );
+        expect(
+          (await crypto.unlock(created.envelope, localPassword)).revision,
+          1,
+        );
+      },
+    );
+  }
+
+  for (final stage in [CommitStage.fileSync, CommitStage.dirSync]) {
+    test(
+      'post-replace fault at ${stage.name} does not change credentials',
+      () async {
+        final created = await crypto.createVault(
+          'old-pass-1234',
+          fixtureRecovery,
+          fixtureData,
+        );
+        final rewrapped = await crypto.rewrapPassword(
+          created,
+          'new-pass-1234',
+          2,
+        );
+        await store.commit(created.envelope);
+
+        native.failAt = stage;
+        await expectLater(
+          store.commit(rewrapped),
+          throwsA(isA<VaultException>()),
+        );
+
+        // Task 3 reports a failed credential commit and keeps the old password.
+        // The bytes on disk must agree, or the user is locked out of the notes.
+        final onDisk = (await store.read())!;
+        expect(onDisk, orderedEquals(created.envelope));
+        final opened = await crypto.unlock(onDisk, 'old-pass-1234');
+        expect(opened.revision, 1);
+        await expectLater(
+          crypto.unlock(onDisk, 'new-pass-1234'),
+          _rejectedAs(FailureCode.credentials),
+        );
+      },
+    );
+  }
+
+  test(
+    'an unrollbackable post-replace fault reports uncertain, not success',
+    () async {
       final created = await crypto.createVault(
         localPassword,
         fixtureRecovery,
@@ -179,21 +334,25 @@ void main() {
       final updated = await crypto.seal(created, fixtureData, 2);
       await store.commit(created.envelope);
 
-      native.failAt = stage;
-      await expectLater(store.commit(updated), throwsA(isA<VaultException>()));
+      native.failAt = CommitStage.dirSync;
+      native.rollbackFails = true;
+      await expectLater(
+        store.commit(updated),
+        throwsA(
+          isA<VaultException>()
+              .having((e) => e.code, 'code', FailureCode.storage)
+              .having((e) => e.detail, 'detail', 'commit.uncertain'),
+        ),
+      );
 
-      final recovered = await store.read();
-      expect(recovered, isNotNull);
-      expect(recovered!, isNotEmpty);
-      if (stage == CommitStage.sync) {
-        // The replacement already happened; only its durability is unverified,
-        // so the store reports the failure and the new bytes stay readable.
-        expect(recovered, orderedEquals(updated));
-      } else {
-        expect(recovered, orderedEquals(created.envelope));
-      }
-    });
-  }
+      // The bytes are not rolled back and must not be claimed as the old vault:
+      // whatever is readable is a complete envelope, and the caller is told the
+      // outcome is uncertain.
+      final readable = await store.read();
+      expect(readable, isNotNull);
+      await crypto.unlock(readable!, localPassword);
+    },
+  );
 
   test(
     'empty, oversized and non-local bytes are refused before staging',
@@ -229,6 +388,23 @@ void main() {
       expect(await store.read(), orderedEquals(created.envelope));
     },
   );
+
+  test('an oversize active file is rejected without reading it', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      fixtureData,
+    );
+    await store.commit(created.envelope);
+
+    // Sparse file: allocating it would be the failure this guards against, so
+    // only its length is written.
+    final raf = await file('vault.enc').open(mode: FileMode.write);
+    await raf.truncate(maxEnvelopeBytes + 1);
+    await raf.close();
+
+    await expectLater(store.read(), _rejectedAs(FailureCode.limit));
+  });
 
   test(
     'a newer envelope version reads as unsupported, not as no vault',
