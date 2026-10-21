@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   characters: ^1.4.1
   cryptography: ^2.9.0
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

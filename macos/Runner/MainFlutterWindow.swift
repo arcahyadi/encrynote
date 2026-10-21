@@ -9,6 +9,8 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    EnCryNoteBridge.register(
+      with: flutterViewController.registrar(forPlugin: "EnCryNoteBridge"))
 
     super.awakeFromNib()
   }
