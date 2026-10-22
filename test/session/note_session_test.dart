@@ -44,6 +44,8 @@ void main() {
   late FakeNativeBridge native;
   late VaultStore store;
   late NoteSession session;
+  late Completer<void> gateEntered;
+  late Completer<void> gateRelease;
   var scratch = 0;
 
   setUpAll(() async {
@@ -567,5 +569,68 @@ void main() {
     await session.unlock(localPassword);
     expect(session.phase, SessionPhase.unlocked);
     expect(session.data!.notes, isEmpty);
+  });
+
+  /// Holds the first store read so a lock can arrive while `load()` is in it.
+  void holdNextRead() {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    var calls = 0;
+    store.debugReadGate = () async {
+      if (calls++ > 0) return;
+      entered.complete();
+      await release.future;
+    };
+    addTearDown(() {
+      store.debugReadGate = null;
+      if (!release.isCompleted) release.complete();
+    });
+    gateEntered = entered;
+    gateRelease = release;
+  }
+
+  test('a lock during load of a fresh install still reaches setup', () async {
+    holdNextRead();
+    final load = session.load();
+    await gateEntered.future;
+
+    await session.lock();
+    gateRelease.complete();
+    await load;
+
+    expect(
+      session.phase,
+      SessionPhase.needsSetup,
+      reason:
+          'a lock must not discard the load result and strand a fresh '
+          'install in locked with no vault',
+    );
+    expect(session.data, isNull);
+
+    await session.setup(localPassword, fixtureRecovery);
+    expect(session.phase, SessionPhase.unlocked);
+  });
+
+  test('a lock during load of an existing vault keeps the questions '
+      'readable', () async {
+    await seedVault();
+    holdNextRead();
+    final load = session.load();
+    await gateEntered.future;
+
+    await session.lock();
+    gateRelease.complete();
+    await load;
+
+    expect(session.phase, SessionPhase.locked);
+    expect(session.data, isNull);
+    expect(
+      session.recoveryQuestions,
+      fixtureRecovery.questions,
+      reason: 'the committed header stays readable while locked',
+    );
+
+    await session.unlock(localPassword);
+    expect(session.data!.notes.single.id, fixtureData.notes.single.id);
   });
 }

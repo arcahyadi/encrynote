@@ -358,11 +358,14 @@ class NoteSession extends ChangeNotifier {
   /// Hides every note immediately, then seals and writes the last accepted edit
   /// before the key is dropped.
   ///
-  /// A lock during `setup`/`load` still invalidates the pending adoption: the
-  /// vault may already be on disk, so the user unlocks instead of being handed
-  /// an unlocked session they left.
+  /// A lock during `setup` invalidates the pending adoption: the vault may
+  /// already be on disk, so the user unlocks instead of being handed an
+  /// unlocked session they left. A lock during `load` must not invalidate the
+  /// load result, because `load` adopts no key and still has to publish
+  /// `needsSetup`/`locked` and the recovery questions.
   Future<void> lock() {
-    if (_phase == SessionPhase.needsSetup || _phase == SessionPhase.loading) {
+    if (_phase == SessionPhase.loading) return Future<void>.value();
+    if (_phase == SessionPhase.needsSetup) {
       if (_busy == 0) return Future<void>.value();
       _epoch++;
       _phase = SessionPhase.locked;
