@@ -40,7 +40,7 @@
 - [x] Task 1: Model vault dan kriptografi lokal yang dapat diuji.
 - [x] Task 2: Penyimpanan ciphertext dengan commit dan pemulihan yang jelas.
 - [x] Task 3: Sesi, autosave, recovery, dan pengurutan perubahan.
-- [ ] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
+- [x] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
 - [ ] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
 - [ ] Task 6: Daftar catatan dan editor Write/Preview yang benar-benar berfungsi.
 - [ ] Task 7: Ekspor terenkripsi dan impor Markdown/encrypted export tanpa cache plaintext.
@@ -149,7 +149,7 @@ expect(session.data!.notes.single.markdown, editedNote.markdown);
 
 **Interfaces:** `EnCryNoteApp({required NoteSession session})`; `AuthScreen({required NoteSession session})`. `main() -> Future<void>` menginisialisasi Flutter, direktori support privat, bridge/store/crypto/session, lalu menjalankan aplikasi. Localization dihasilkan menjadi `lib/l10n/generated/app_localizations.dart`, dipakai melalui `AppLocalizations.of(context)!`.
 
-- [ ] **Step 1:** Ganti smoke test counter dengan test gagal English setup, validasi 7/8 grapheme, tepat tiga pasangan pertanyaan/jawaban bebas, konfirmasi password, credential salah, recovery ke password baru, setup gagal-save yang tetap bisa dicoba, dan corrupt vault yang tidak menampilkan form instalasi baru:
+- [x] **Step 1:** Ganti smoke test counter dengan test gagal English setup, validasi 7/8 grapheme, tepat tiga pasangan pertanyaan/jawaban bebas, konfirmasi password, credential salah, recovery ke password baru, setup gagal-save yang tetap bisa dicoba, dan corrupt vault yang tidak menampilkan form instalasi baru:
 
 ```dart
 await tester.pumpWidget(EnCryNoteApp(session: session));
@@ -160,11 +160,11 @@ expect(find.text('Recovery question 3'), findsOneWidget);
 expect(find.text('Recovery question 4'), findsNothing);
 ```
 
-- [ ] **Step 2:** Jalankan `flutter test test/auth/auth_screen_test.dart test/widget_test.dart` untuk hasil RED yang relevan.
-- [ ] **Step 3:** Implementasikan alur sesuai phase sesi, termasuk loading/error/retry. Tambah `flutter_localizations` dari SDK dan `intl: any` yang mengikuti pin SDK; aktifkan `generate: true` dan ARB. Label English di atas adalah key `createPasswordTitle`, `recoveryQuestionLabel(index)`; tambahkan keterangan bahwa teks pertanyaan dapat dibaca saat locked, jawaban case-sensitive setelah trim tepi, dan recovery tidak dapat membuka ekspor. Phase recovering menampilkan pembuatan password baru, bukan catatan. Jangan menyimpan controller password setelah selesai.
-- [ ] **Step 4:** Tampilkan nama EnCryNote, tema Material dari seed yang sudah ada dengan pasangan light/dark mengikuti OS. Untuk rename produk macOS, ubah juga semua BuildableName dan TEST_HOST yang masih menunjuk `hello_flutter.app/hello_flutter`; jangan mengganti namespace/bundle ID tanpa alasan tambahan.
-- [ ] **Step 5:** Jalankan `flutter gen-l10n`, test Task 4, `flutter analyze`, serta build macOS; pastikan label English tetap muncul pada locale OS yang belum didukung, dan referensi test host produk baru konsisten.
-- [ ] **Step 6:** Commit: `feat: add localized EnCryNote setup and unlock flows`.
+- [x] **Step 2:** Jalankan `flutter test test/auth/auth_screen_test.dart test/widget_test.dart` untuk hasil RED yang relevan.
+- [x] **Step 3:** Implementasikan alur sesuai phase sesi, termasuk loading/error/retry. Tambah `flutter_localizations` dari SDK dan `intl: any` yang mengikuti pin SDK; aktifkan `generate: true` dan ARB. Label English di atas adalah key `createPasswordTitle`, `recoveryQuestionLabel(index)`; tambahkan keterangan bahwa teks pertanyaan dapat dibaca saat locked, jawaban case-sensitive setelah trim tepi, dan recovery tidak dapat membuka ekspor. Phase recovering menampilkan pembuatan password baru, bukan catatan. Jangan menyimpan controller password setelah selesai.
+- [x] **Step 4:** Tampilkan nama EnCryNote, tema Material dari seed yang sudah ada dengan pasangan light/dark mengikuti OS. Untuk rename produk macOS, ubah juga semua BuildableName dan TEST_HOST yang masih menunjuk `hello_flutter.app/hello_flutter`; jangan mengganti namespace/bundle ID tanpa alasan tambahan.
+- [x] **Step 5:** Jalankan `flutter gen-l10n`, test Task 4, `flutter analyze`, serta build macOS; pastikan label English tetap muncul pada locale OS yang belum didukung, dan referensi test host produk baru konsisten.
+- [x] **Step 6:** Commit: `feat: add localized EnCryNote setup and unlock flows`.
 
 ### Task 5: Inactivity lock dan privacy lifecycle
 
