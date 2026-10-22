@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show FrameTiming;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -82,14 +83,46 @@ void main() {
     expect(session.phase, SessionPhase.unlocked);
   }
 
-  /// Delivers a native focus event in the real zone so a lock's file IO can
-  /// finish, then paints the result.
+  /// Reports one rasterized frame through the engine's own timings callback.
+  ///
+  /// The test binding never rasterizes anything, so this is how a live engine
+  /// tells the app that a frame really reached the screen.
+  int frameNumber = 0;
+  void rasterize(WidgetTester tester) {
+    // The test binding advances its own frame counter on every pump, so a
+    // reported frame has to be newer than that too.
+    final building = tester.binding.platformDispatcher.frameData.frameNumber;
+    frameNumber = (frameNumber > building ? frameNumber : building) + 1;
+    tester.binding.platformDispatcher.onReportTimings?.call(<FrameTiming>[
+      FrameTiming(
+        vsyncStart: frameNumber * 16666,
+        buildStart: frameNumber * 16666 + 100,
+        buildFinish: frameNumber * 16666 + 900,
+        rasterStart: frameNumber * 16666 + 1000,
+        rasterFinish: frameNumber * 16666 + 5000,
+        rasterFinishWallTime: frameNumber * 16666 + 5000,
+        frameNumber: frameNumber,
+      ),
+    ]);
+  }
+
   /// Emits a native focus event from the widget zone, then alternates real IO
   /// turns with fake-zone pumps until [done] or the frame budget runs out.
+  ///
+  /// Each iteration also reports a rasterized frame, like a live engine would.
   Future<void> settle(WidgetTester tester, {bool Function()? done}) async {
     for (var i = 0; i < 200; i++) {
       if (done != null && done()) break;
       await tester.pump(const Duration(milliseconds: 10));
+      rasterize(tester);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 2)),
+      );
+    }
+    // Let the queued shield calls and their futures finish after [done].
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+      rasterize(tester);
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 2)),
       );
@@ -97,6 +130,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
   }
+
+  /// True once the cover has been installed at least once and then removed, so
+  /// a wait cannot mistake the initial unshielded state for a finished resume.
+  bool shieldCycled(FakeNativeBridge bridge) =>
+      bridge.events.contains('shield:true') && !bridge.shieldVisible;
 
   Future<void> blur(WidgetTester tester, {bool Function()? done}) async {
     native.emitFocus(false);
@@ -203,8 +241,7 @@ void main() {
     await unlock(tester);
     await pumpApp(tester);
 
-    native.emitFocus(false);
-    await tester.pump();
+    await blur(tester);
     expect(native.shieldVisible, isTrue);
     expect(session.phase, SessionPhase.unlocked);
 
@@ -226,8 +263,7 @@ void main() {
     expect(session.phase, SessionPhase.locked);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pump();
-    await tester.pump();
+    await settle(tester, done: () => native.shieldVisible == false);
     expect(native.shieldVisible, isFalse);
     expect(find.text('Unlock EnCryNote'), findsOneWidget);
   });
@@ -366,15 +402,33 @@ void main() {
     );
   });
 
-  testWidgets('a timed mode keeps typed secrets on a locked form', (
+  testWidgets('a cold-start locked vault drops typed secrets on leaving', (
     tester,
   ) async {
-    await loadLocked(tester);
-    await pumpApp(tester);
+    // The vault really saves Immediately, but nothing can decrypt that until
+    // the first unlock, so the policy reads oneMinute for this whole form.
+    final created = await io(tester, () async {
+      final vault = await crypto.createVault(
+        localPassword,
+        fixtureRecovery,
+        fixtureData.copyWith(autoLock: AutoLockMode.immediately),
+      );
+      await File('${dir.path}/vault.enc').writeAsBytes(vault.envelope);
+      await session.load();
+      return vault;
+    });
+    expect(created.data.autoLock, AutoLockMode.immediately);
+    expect(session.phase, SessionPhase.locked);
+    expect(
+      session.autoLock,
+      AutoLockMode.oneMinute,
+      reason: 'the encrypted policy is unknown before the first unlock',
+    );
 
+    await pumpApp(tester);
     await tester.enterText(
       find.byKey(const ValueKey('unlockPasswordInput')),
-      'typed-secret-1',
+      localPassword,
     );
     await tester.pump();
 
@@ -386,9 +440,66 @@ void main() {
     );
     expect(
       field.controller!.text,
-      'typed-secret-1',
-      reason: 'a timed mode is not an Immediately leaving',
+      isEmpty,
+      reason: 'an unknown policy must be treated as Immediately',
     );
+    expect(session.phase, SessionPhase.locked);
+  });
+
+  testWidgets('a cold-start locked recovery form drops typed answers', (
+    tester,
+  ) async {
+    await loadLocked(tester);
+    await pumpApp(tester);
+    await tester.tap(find.byKey(const ValueKey('forgotPasswordButton')));
+    await tester.pump();
+    for (var i = 0; i < 3; i++) {
+      await tester.enterText(
+        find.byKey(ValueKey('recoveryAnswer${i + 1}')),
+        fixtureRecovery.answers[i],
+      );
+    }
+    await tester.pump();
+
+    await blur(tester);
+    await refocus(tester);
+
+    expect(find.text('Recover your vault'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('forgotPasswordButton')));
+    await tester.pump();
+    for (var i = 0; i < 3; i++) {
+      final field = tester.widget<TextFormField>(
+        find.byKey(ValueKey('recoveryAnswer${i + 1}')),
+      );
+      expect(field.controller!.text, isEmpty);
+    }
+  });
+
+  testWidgets('a timed policy keeps its full window across a blur', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await pumpApp(tester);
+
+    // 30 s of the chosen 1-minute window, then a blur/return.
+    await tick(tester, const Duration(seconds: 30));
+    await blur(tester);
+    await refocus(tester);
+
+    expect(session.phase, SessionPhase.unlocked);
+    expect(native.shieldVisible, isFalse);
+
+    // Focus is not activity, so the original deadline still stands: 29 s later
+    // the vault is still open, one second after that it locks.
+    await tick(tester, const Duration(seconds: 29));
+    expect(
+      session.phase,
+      SessionPhase.unlocked,
+      reason: 'a focus round trip must not shorten the chosen duration',
+    );
+    await tick(tester, const Duration(seconds: 1));
+    await settle(tester, done: () => session.phase == SessionPhase.locked);
+    expect(session.phase, SessionPhase.locked);
   });
 
   testWidgets('a locked session does not re-run the lock pipeline', (
@@ -450,7 +561,7 @@ void main() {
     // A second blur/focus pair arrives before the first checks finish.
     native.emitFocus(false);
     native.emitFocus(true);
-    await settle(tester);
+    await settle(tester, done: () => shieldCycled(native));
 
     expect(native.shieldVisible, isFalse);
     expect(session.phase, SessionPhase.unlocked);
@@ -531,7 +642,7 @@ void main() {
     // Blur and return in the same frame: the lock's flush is still running.
     native.emitFocus(false);
     native.emitFocus(true);
-    await settle(tester, done: () => native.shieldVisible == false);
+    await settle(tester, done: () => shieldCycled(native));
 
     expect(session.phase, SessionPhase.locked);
     expect(native.shieldVisible, isFalse);
@@ -559,29 +670,121 @@ void main() {
     expect(find.text('Unlock EnCryNote'), findsOneWidget);
   });
 
-  testWidgets('a resume that never paints leaves the cover up, not stuck', (
+  testWidgets('a stale resume never uncovers the newer shield', (tester) async {
+    await unlock(tester);
+    await pumpApp(tester);
+
+    // Leave and return; the resume is now inside its raster wait.
+    native.emitFocus(false);
+    await tester.pump();
+    native.emitFocus(true);
+    await tester.pump();
+    expect(native.events, ['shield:true']);
+
+    // A second leaving/return pair is delivered while that wait is still
+    // pending, so the app is focused again but under a newer shield.
+    native.emitFocus(false);
+    native.emitFocus(true);
+    await tester.pump();
+    await tester.pump();
+
+    // The frame rasterizes now, while the window is focused. Only the shield
+    // epoch can tell the older resume that this frame is not its own.
+    rasterize(tester);
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(native.events, [
+      'shield:true',
+    ], reason: 'a stale resume must not reveal the newer shield');
+
+    // The newer resume gets a frame of its own.
+    rasterize(tester);
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(native.events, ['shield:true', 'shield:false']);
+    expect(native.shieldVisible, isFalse);
+
+    // Drain the retry cadence so no timer outlives the tree.
+    native.emitFocus(false);
+    await tester.pump();
+    await tester.pump(PrivacyLifecycle.frameWait * 2);
+  });
+
+  testWidgets('a slow-but-eventual frame uncovers without another toggle', (
     tester,
   ) async {
     await unlock(tester);
     await pumpApp(tester);
 
-    // Minimized/occluded: the engine stops producing frames, so the resume
-    // cannot get a painted frame. It must give up and keep the cover.
-    await tester.binding.setSurfaceSize(const Size(1, 1));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    tester.binding.scheduleFrame();
+    // Leave and return, but the engine produces no rasterized frame at all for
+    // longer than the retry cadence: exactly the minimized-window restore.
     native.emitFocus(false);
     await tester.pump();
     native.emitFocus(true);
-    await tester.pump(
-      PrivacyLifecycle.frameWait + const Duration(milliseconds: 1),
+    await tester.pump(PrivacyLifecycle.frameWait * 3);
+
+    expect(
+      native.shieldVisible,
+      isTrue,
+      reason: 'no rasterized frame yet, so the cover must stay',
     );
 
+    // The engine finally draws. No further focus event is sent.
+    rasterize(tester);
+    await settle(tester, done: () => shieldCycled(native));
+
+    expect(native.shieldVisible, isFalse);
+    expect(session.phase, SessionPhase.unlocked);
+    expect(find.text('Your vault is unlocked'), findsOneWidget);
+  });
+
+  testWidgets('a framework frame alone never uncovers the window', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await pumpApp(tester);
+
+    native.emitFocus(false);
+    await tester.pump();
+    native.emitFocus(true);
+    // Pump many framework frames without any engine timings report.
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(
+      native.shieldVisible,
+      isTrue,
+      reason: 'a built frame is not a rasterized frame',
+    );
+
+    // Let the retry cadence and the queued shield calls drain before the test
+    // ends, so no timer outlives the widget tree.
+    native.emitFocus(false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
+  testWidgets('a window that never draws keeps the cover, not a stuck resume', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await pumpApp(tester);
+
+    native.emitFocus(false);
+    await tester.pump();
+    native.emitFocus(true);
+    await tester.pump(PrivacyLifecycle.frameWait * 2);
     expect(native.shieldVisible, isTrue);
 
-    // Frames resume: the next focus gain can uncover normally.
-    await tester.binding.setSurfaceSize(const Size(800, 1200));
-    await refocus(tester);
+    // A later leaving/return pair still works: the retry loop is not stuck.
+    native.emitFocus(false);
+    await tester.pump();
+    native.emitFocus(true);
+    rasterize(tester);
+    await settle(tester, done: () => shieldCycled(native));
     expect(native.shieldVisible, isFalse);
   });
 

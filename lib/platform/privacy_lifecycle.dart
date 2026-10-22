@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -14,8 +15,8 @@ import 'native_bridge.dart';
 /// Activity is counted only from real input (pointer, scroll, keys) on the root
 /// listener. Lifecycle and focus events are never activity: leaving the app
 /// shields at once, and returning checks the deadline before the shield may be
-/// removed. The shield stays up until a Flutter frame has been rendered after
-/// those checks, so a stale note frame is never revealed on resume.
+/// removed. The shield stays up until the engine reports a frame rasterized
+/// after those checks, so a stale note frame is never revealed on resume.
 class PrivacyLifecycle extends StatefulWidget {
   const PrivacyLifecycle({
     super.key,
@@ -30,7 +31,8 @@ class PrivacyLifecycle extends StatefulWidget {
   final NativeBridge native;
   final Widget child;
 
-  /// How long a resume waits for a painted frame before leaving the cover up.
+  /// How long a resume waits for a rasterized frame before nudging the engine
+  /// and waiting again. It is a retry cadence, never a reason to uncover.
   static const Duration frameWait = Duration(milliseconds: 250);
 
   /// Clock injection for deterministic tests; production uses the wall clock.
@@ -55,6 +57,10 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
   bool _foreground = true;
   bool _resuming = false;
   int _shieldEpoch = 0;
+  int _rasterBaseline = 0;
+  int _lastRasterFrame = 0;
+  VoidCallback? _rasterWait;
+  VoidCallback? _cancelFrameWait;
   Future<void> _shieldTail = Future<void>.value();
 
   NoteSession get _session => widget.session;
@@ -71,6 +77,7 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SchedulerBinding.instance.addTimingsCallback(_onFrameTimings);
     HardwareKeyboard.instance.addHandler(_onKey);
     _activitySignal.addListener(_onUserEdit);
     _session.addListener(_onSessionChanged);
@@ -106,6 +113,8 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
 
   @override
   void dispose() {
+    _cancelFrameWait?.call();
+    SchedulerBinding.instance.removeTimingsCallback(_onFrameTimings);
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onKey);
     _activitySignal.removeListener(_onUserEdit);
@@ -214,18 +223,20 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
 
   Future<void> _left() async {
     _shield();
-    // The one policy source: Immediately locks here, and a timed window keeps
-    // counting. A session with nothing to hide has no [IdleLock] at all.
-    await _idle?.focusChanged(false);
-    // An already-locked form holds typed secrets but no key, so no lock
-    // pipeline runs; the form still has to drop what the user typed. Setup has
-    // no saved policy to consult and cold start is always locked, so a leaving
-    // there drops them too. A timed policy on a locked form keeps them, exactly
-    // as it keeps an open session's window running.
-    if (_session.autoLock == AutoLockMode.immediately ||
+    // Credential drafts go first and synchronously: the drop must not wait for
+    // a slow lock flush, and it must never land after the user has returned and
+    // typed again.
+    //
+    // A form with no key cannot know the encrypted policy, so "unknown" is
+    // treated as Immediately. This never shortens an unlocked vault's chosen
+    // duration; that path keeps its window and is decided by [IdleLock].
+    if (_session.phase == SessionPhase.locked ||
         _session.phase == SessionPhase.needsSetup) {
       _leavingSignal.report();
     }
+    // The one policy source for keyed sessions: Immediately locks here, and a
+    // timed window keeps counting.
+    await _idle?.focusChanged(false);
   }
 
   /// Runs on every focus gain, including one this widget did not cause: the
@@ -242,44 +253,85 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
         final epoch = _shieldEpoch;
         // Deadline first: input and focus must never reset an overdue window.
         await _idle?.checkDeadline();
-        // Only after the checks has a safe frame been built and painted.
-        final painted = await _nextFrame();
         if (!mounted || !_focused || !_foreground) return;
-        if (!painted) return;
+        if (epoch != _shieldEpoch) continue;
+        // Only a frame the engine really rasterized may reveal the window.
+        if (!await _awaitRasterized()) return;
+        if (!mounted || !_focused || !_foreground) return;
+        // A newer leaving arrived while waiting: that shield owns its own
+        // deadline and frame confirmation, so start the checks over.
         if (epoch != _shieldEpoch) continue;
         _unshield();
-        return;
+        break;
       }
     } finally {
       _resuming = false;
     }
   }
 
-  /// Waits for one painted frame, scheduling it explicitly: [endOfFrame] alone
-  /// does not request a frame when it is called from inside a frame callback.
+  /// Waits until a frame newer than the last one is rasterized, retrying for as
+  /// long as the window is still front-most and no newer leaving intervened.
   ///
-  /// Bounded: a minimized or occluded window may stop producing frames, and an
-  /// unbounded wait would keep the cover up forever. Timing out leaves the
-  /// cover installed, which is the safe direction.
-  Future<bool> _nextFrame() {
+  /// Returns `false` only when the window stopped being front-most or the widget
+  /// unmounted; the caller still decides whether a newer shield superseded this
+  /// resume. A timeout is not an answer: it re-nudges the engine and waits
+  /// again, so a slow first frame is uncovered once it arrives, and a window
+  /// that never draws keeps the cover.
+  Future<bool> _awaitRasterized() async {
     final binding = WidgetsBinding.instance;
-    binding.scheduleFrame();
-    final painted = Completer<bool>();
-    late final Timer limit;
-    void finish(bool value) {
-      if (painted.isCompleted) return;
-      limit.cancel();
-      painted.complete(value);
+    while (mounted && _focused && _foreground) {
+      if (await _nextRasterizedFrame()) return true;
+      if (!mounted || !_focused || !_foreground) return false;
+      binding.scheduleFrame();
+    }
+    return false;
+  }
+
+  /// One wait for a rasterized frame, bounded so the caller can re-check focus
+  /// and the shield epoch. Completion comes from [FrameTiming.rasterFinish],
+  /// which the engine reports only after the frame was rasterized; the bound
+  /// therefore means "not yet", never "safe".
+  Future<bool> _nextRasterizedFrame() {
+    final binding = WidgetsBinding.instance;
+    // The strongest baseline the platform offers: the frame being built now,
+    // and never a frame already reported. A batch still in flight from before
+    // the cover went up therefore cannot count as the safe frame.
+    final building = binding.platformDispatcher.frameData.frameNumber;
+    _rasterBaseline = building > _lastRasterFrame ? building : _lastRasterFrame;
+    final done = Completer<bool>();
+    Timer? limit;
+
+    void finish(bool rasterized) {
+      if (done.isCompleted) return;
+      limit?.cancel();
+      _rasterWait = null;
+      _cancelFrameWait = null;
+      done.complete(rasterized);
     }
 
+    _rasterWait = () => finish(true);
+    // Dispose must release this wait, or its timer outlives the widget tree.
+    _cancelFrameWait = () => finish(false);
     limit = Timer(PrivacyLifecycle.frameWait, () => finish(false));
-    binding.endOfFrame.then(
-      (_) => finish(true),
-      onError: (Object _) {
-        finish(false);
-      },
-    );
-    return painted.future;
+    if (_lastRasterFrame > _rasterBaseline) {
+      finish(true);
+    } else {
+      binding.scheduleFrame();
+    }
+    return done.future;
+  }
+
+  /// Records the newest frame the engine reported as rasterized. It is the only
+  /// evidence that a frame reached the screen; a framework callback alone is
+  /// not enough. Comparing frame numbers keeps a batch that was already in
+  /// flight before the cover went up from counting as the safe frame.
+  void _onFrameTimings(List<FrameTiming> timings) {
+    for (final timing in timings) {
+      if (timing.frameNumber > _lastRasterFrame) {
+        _lastRasterFrame = timing.frameNumber;
+      }
+    }
+    if (_lastRasterFrame > _rasterBaseline) _rasterWait?.call();
   }
 
   void _shield() {
