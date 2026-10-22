@@ -41,7 +41,7 @@
 - [x] Task 2: Penyimpanan ciphertext dengan commit dan pemulihan yang jelas.
 - [x] Task 3: Sesi, autosave, recovery, dan pengurutan perubahan.
 - [x] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
-- [ ] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
+- [x] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
 - [ ] Task 6: Daftar catatan dan editor Write/Preview yang benar-benar berfungsi.
 - [ ] Task 7: Ekspor terenkripsi dan impor Markdown/encrypted export tanpa cache plaintext.
 - [ ] Task 8: Pemeriksaan lintas platform, offline, lisensi, dan panduan kontribusi.
@@ -172,7 +172,7 @@ expect(find.text('Recovery question 4'), findsNothing);
 
 **Interfaces:** `IdleLock({required DateTime Function() now, required Duration Function() elapsed, required Future<void> Function() onLock})`; methods `setMode(AutoLockMode mode) -> void`, `activity() -> void`, `focusChanged(bool focused) -> Future<void>`, `checkDeadline() -> Future<void>`, `dispose() -> void`, getter `DateTime? deadline`. `elapsed` memakai Stopwatch milik lifecycle selama proses hidup; test menginjeksi durasi yang dapat dikontrol. `PrivacyLifecycle({required NoteSession session, required NativeBridge native, required Widget child})`; `SettingsScreen({required NoteSession session})`. Bridge menambahkan `Stream<bool> get focusChanges` dan `setPrivacyShield(bool visible) -> Future<void>`.
 
-- [ ] **Step 1:** Tulis test gagal clock terkontrol untuk 1/5/10 menit tepat pada batas, aktivitas scrolling/keyboard/tap yang me-reset timer, pekerjaan background yang tidak me-reset, serta Immediately saat fokus hilang:
+- [x] **Step 1:** Tulis test gagal clock terkontrol untuk 1/5/10 menit tepat pada batas, aktivitas scrolling/keyboard/tap yang me-reset timer, pekerjaan background yang tidak me-reset, serta Immediately saat fokus hilang:
 
 ```dart
 lock.setMode(AutoLockMode.oneMinute);
@@ -188,11 +188,11 @@ expect(lockCalls, 1);
 ```
 
   Test widget memastikan pilihan tepat `['Immediately', '1 minute', '5 minutes', '10 minutes']`, nilai default oneMinute, serta tidak ada Never. Key ARB berturut-turut `autoLockImmediately`, `autoLockOneMinute`, `autoLockFiveMinutes`, `autoLockTenMinutes`. Test resume melewati deadline harus tetap locked sebelum event input/focus dapat meresetnya; pergeseran jam sistem ke belakang tidak boleh memperpanjang sesi (lock saat anomali terdeteksi).
-- [ ] **Step 2:** Jalankan `flutter test test/lock` dan periksa hasil RED.
-- [ ] **Step 3:** Implementasikan timer selama sesi unlocked/recovering dan recheck tenggat saat resume. Root listener menghitung aktivitas nyata, bukan rebuild/autosave; lifecycle/native-focus bukan aktivitas yang memperpanjang deadline. Pakai waktu elapsed monotonic selama proses hidup ditambah pemeriksaan resume/clock anomaly, bukan semata timer OS. Di `main`, bungkus `EnCryNoteApp(session: session)` dengan `PrivacyLifecycle(session: session, native: native, child: ...)`; tidak mengubah constructor app hanya untuk lifecycle.
-- [ ] **Step 4:** Native bridge memasang privacy shield sebelum tampilan inactive masuk snapshot; Flutter hanya menghapus shield sesudah focus aktif, deadline diperiksa, dan state sesi aman. Dialog Flutter tidak dianggap blur; dialog file OS tetap dapat mengunci. Jangan menambah larangan screenshot pengguna yang sedang unlock sebagai fitur baru.
+- [x] **Step 2:** Jalankan `flutter test test/lock` dan periksa hasil RED.
+- [x] **Step 3:** Implementasikan timer selama sesi unlocked/recovering dan recheck tenggat saat resume. Root listener menghitung aktivitas nyata, bukan rebuild/autosave; lifecycle/native-focus bukan aktivitas yang memperpanjang deadline. Pakai waktu elapsed monotonic selama proses hidup ditambah pemeriksaan resume/clock anomaly, bukan semata timer OS. Di `main`, bungkus `EnCryNoteApp(session: session)` dengan `PrivacyLifecycle(session: session, native: native, child: ...)`; tidak mengubah constructor app hanya untuk lifecycle.
+- [x] **Step 4:** Native bridge memasang privacy shield sebelum tampilan inactive masuk snapshot; Flutter hanya menghapus shield sesudah focus aktif, deadline diperiksa, dan state sesi aman. Dialog Flutter tidak dianggap blur; dialog file OS tetap dapat mengunci. Jangan menambah larangan screenshot pengguna yang sedang unlock sebagai fitur baru.
 - [ ] **Step 5:** Jalankan `flutter test test/lock test/session`, lalu verifikasi manual macOS/Android: app switcher, minimize, berpindah jendela, sleep/resume dan keyboard layar tidak mengekspos frame catatan sebelum pengecekan. Catat keterbatasan platform, bukan klaim tanpa bukti.
-- [ ] **Step 6:** Commit: `feat: enforce inactivity locking and private lifecycle views`.
+- [x] **Step 6:** Commit: `feat: enforce inactivity locking and private lifecycle views`.
 
 ### Task 6: Catatan dan editor Markdown
 
