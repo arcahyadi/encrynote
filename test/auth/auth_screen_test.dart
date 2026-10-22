@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hello_flutter/app.dart';
+import 'package:hello_flutter/lock/privacy_signals.dart';
 import 'package:hello_flutter/session/note_session.dart';
 import 'package:hello_flutter/vault/vault_crypto.dart';
 import 'package:hello_flutter/vault/vault_store.dart';
@@ -407,6 +408,49 @@ void main() {
     );
     expect(field.controller!.text, isEmpty);
     expect(session.phase, SessionPhase.locked);
+  });
+
+  testWidgets('the leaving signal drops typed secrets without a session lock', (
+    tester,
+  ) async {
+    useTallViewport(tester);
+    await seedVault(tester);
+    await load(tester);
+    final activity = PrivacySignal();
+    final leavings = PrivacySignal();
+    addTearDown(activity.dispose);
+    addTearDown(leavings.dispose);
+    await tester.pumpWidget(
+      PrivacySignals(
+        activity: activity,
+        leavings: leavings,
+        child: EnCryNoteApp(session: session),
+      ),
+    );
+    await tester.pump();
+
+    await tapKey(tester, 'forgotPasswordButton');
+    for (var i = 0; i < 3; i++) {
+      await enter(tester, 'recoveryAnswer${i + 1}', 'typed answer');
+    }
+    final generation = session.lockGeneration;
+
+    leavings.report();
+    await tester.pump();
+
+    expect(
+      session.lockGeneration,
+      generation,
+      reason: 'an already-locked form has no key or write to flush',
+    );
+    expect(find.text('Recover your vault'), findsNothing);
+    await tapKey(tester, 'forgotPasswordButton');
+    for (var i = 0; i < 3; i++) {
+      final field = tester.widget<TextFormField>(
+        find.byKey(ValueKey('recoveryAnswer${i + 1}')),
+      );
+      expect(field.controller!.text, isEmpty);
+    }
   });
 
   testWidgets('an unlocked session can open Settings', (tester) async {

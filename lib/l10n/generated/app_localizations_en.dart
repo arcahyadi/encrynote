@@ -178,9 +178,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsFrozenHint =>
-      'A change is not saved yet, so auto-lock cannot change until the save succeeds.';
+      'A change is not saved yet. Auto-lock stays read-only until the save succeeds.';
 
   @override
   String get settingsSaveFailed =>
-      'EnCryNote could not save that setting. Nothing was changed; try again.';
+      'The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds.';
 }

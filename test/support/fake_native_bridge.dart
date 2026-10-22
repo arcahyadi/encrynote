@@ -47,6 +47,9 @@ class FakeNativeBridge implements NativeBridge {
   /// Models the native shield installation failing.
   bool failShield = false;
 
+  /// Models a bridge throwing something that is not a [VaultException].
+  bool throwRawOnShield = false;
+
   @override
   Stream<bool> get focusChanges => _focus.stream;
 
@@ -54,6 +57,7 @@ class FakeNativeBridge implements NativeBridge {
   @override
   Future<void> setPrivacyShield(bool visible) async {
     shieldCalls++;
+    if (throwRawOnShield) throw StateError('shield.raw');
     if (failShield) {
       throw const VaultException(FailureCode.storage, 'shield.failed');
     }

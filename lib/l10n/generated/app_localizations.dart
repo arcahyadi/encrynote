@@ -403,13 +403,13 @@ abstract class AppLocalizations {
   /// No description provided for @settingsFrozenHint.
   ///
   /// In en, this message translates to:
-  /// **'A change is not saved yet, so auto-lock cannot change until the save succeeds.'**
+  /// **'A change is not saved yet. Auto-lock stays read-only until the save succeeds.'**
   String get settingsFrozenHint;
 
   /// No description provided for @settingsSaveFailed.
   ///
   /// In en, this message translates to:
-  /// **'EnCryNote could not save that setting. Nothing was changed; try again.'**
+  /// **'The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds.'**
   String get settingsSaveFailed;
 }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/generated/app_localizations.dart';
+import '../lock/privacy_signals.dart';
 import '../session/note_session.dart';
 import '../settings/settings_screen.dart';
 import '../vault/vault_types.dart';
@@ -30,6 +31,7 @@ class _AuthScreenState extends State<AuthScreen> {
   String? _error;
   SessionPhase? _phase;
   int _lockGeneration = 0;
+  PrivacySignal? _leavings;
 
   @override
   void initState() {
@@ -37,6 +39,27 @@ class _AuthScreenState extends State<AuthScreen> {
     _phase = widget.session.phase;
     _lockGeneration = widget.session.lockGeneration;
     widget.session.addListener(_dropStaleFields);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // An Immediately blur while already locked runs no lock pipeline, so the
+    // lifecycle reports the leaving directly; typed secrets still have to go.
+    final leavings = PrivacySignals.maybeOf(context)?.leavings;
+    if (leavings != _leavings) {
+      _leavings?.removeListener(_dropTypedSecrets);
+      _leavings = leavings;
+      _leavings?.addListener(_dropTypedSecrets);
+    }
+  }
+
+  void _dropTypedSecrets() {
+    if (!mounted) return;
+    setState(() {
+      _error = null;
+      _dropAllFields();
+    });
   }
 
   @override
@@ -54,6 +77,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     widget.session.removeListener(_dropStaleFields);
+    _leavings?.removeListener(_dropTypedSecrets);
     _dropAllFields();
     super.dispose();
   }
@@ -228,6 +252,7 @@ class _AuthScreenState extends State<AuthScreen> {
       enableSuggestions: false,
       autocorrect: false,
       textInputAction: action,
+      onChanged: (_) => PrivacySignals.reportActivity(context),
       onFieldSubmitted: onSubmitted == null ? null : (_) => onSubmitted(),
       decoration: InputDecoration(
         labelText: label,
@@ -247,6 +272,7 @@ class _AuthScreenState extends State<AuthScreen> {
       key: key,
       controller: controller,
       textInputAction: action,
+      onChanged: (_) => PrivacySignals.reportActivity(context),
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),

@@ -65,6 +65,6 @@
   "autoLockFiveMinutes": "5 minutes",
   "autoLockTenMinutes": "10 minutes",
   "settingsLockedHint": "Your vault is locked. Unlock to change this.",
-  "settingsFrozenHint": "A change is not saved yet, so auto-lock cannot change until the save succeeds.",
-  "settingsSaveFailed": "EnCryNote could not save that setting. Nothing was changed; try again."
+  "settingsFrozenHint": "A change is not saved yet. Auto-lock stays read-only until the save succeeds.",
+  "settingsSaveFailed": "The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds."
 }

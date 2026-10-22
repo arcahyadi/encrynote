@@ -25,6 +25,10 @@ void main() {
   late Directory dir;
   late FakeNativeBridge native;
   late NoteSession session;
+  // Controllable clocks: pumping fake time alone does not move the real clock
+  // the lifecycle would otherwise use.
+  late DateTime now;
+  late Duration elapsed;
   var scratch = 0;
 
   setUpAll(() async {
@@ -47,6 +51,8 @@ void main() {
     scratch++;
     dir = await Directory('${scratchRoot.path}/$scratch')
         .create(recursive: true);
+    now = DateTime.utc(2026, 10, 22, 12);
+    elapsed = Duration.zero;
     native = FakeNativeBridge();
     session = NoteSession(
       crypto: crypto,
@@ -102,6 +108,13 @@ void main() {
     await settle(tester);
   }
 
+  /// Moves both injected clocks and lets the armed timer fire.
+  Future<void> tick(WidgetTester tester, Duration duration) async {
+    now = now.add(duration);
+    elapsed += duration;
+    await tester.pump(duration);
+  }
+
   Future<void> pumpApp(WidgetTester tester) async {
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = const Size(800, 1200);
@@ -110,6 +123,8 @@ void main() {
       PrivacyLifecycle(
         session: session,
         native: native,
+        now: () => now,
+        elapsed: () => elapsed,
         child: EnCryNoteApp(session: session),
       ),
     );
@@ -139,6 +154,48 @@ void main() {
       expect(find.text('Your vault is unlocked'), findsNothing);
     },
   );
+
+  testWidgets('foreground inactivity locks at the armed deadline', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await pumpApp(tester);
+
+    // No blur and no input: only the armed timer can enforce this.
+    await tick(tester, const Duration(seconds: 59));
+    expect(session.phase, SessionPhase.unlocked);
+
+    await tick(tester, const Duration(seconds: 1));
+    await settle(tester, done: () => session.phase == SessionPhase.locked);
+
+    expect(session.phase, SessionPhase.locked);
+    expect(session.data, isNull);
+    expect(native.shieldVisible, isFalse);
+    expect(find.text('Unlock EnCryNote'), findsOneWidget);
+  });
+
+  testWidgets('typed activity restarts the armed deadline', (tester) async {
+    await unlock(tester);
+    await io(tester, () async {
+      await session.lock();
+      await session.beginRecovery(fixtureRecovery.answers);
+    });
+    await pumpApp(tester);
+
+    await tick(tester, const Duration(seconds: 40));
+    await tester.enterText(find.byKey(const ValueKey('newPasswordInput')), 'x');
+    await tester.pump();
+    await tick(tester, const Duration(seconds: 40));
+    expect(
+      session.phase,
+      SessionPhase.recovering,
+      reason: 'typing 40s in restarts the 1-minute window',
+    );
+
+    await tick(tester, const Duration(seconds: 20));
+    await settle(tester, done: () => session.phase == SessionPhase.locked);
+    expect(session.phase, SessionPhase.locked);
+  });
 
   testWidgets('a timed mode keeps the session through a short blur', (
     tester,
@@ -223,20 +280,163 @@ void main() {
     expect(find.text('Unlock EnCryNote'), findsOneWidget);
   });
 
-  testWidgets('a locked session never runs the lock pipeline again', (
+  testWidgets('an Immediately blur drops typed secrets on a locked form', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await io(tester, () => session.setAutoLock(AutoLockMode.immediately));
+    await io(tester, session.lock);
+    await pumpApp(tester);
+    expect(find.text('Unlock EnCryNote'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('unlockPasswordInput')),
+      localPassword,
+    );
+    await tester.pump();
+
+    await blur(tester);
+    await refocus(tester);
+
+    expect(session.phase, SessionPhase.locked);
+    final field = tester.widget<TextFormField>(
+      find.byKey(const ValueKey('unlockPasswordInput')),
+    );
+    expect(
+      field.controller!.text,
+      isEmpty,
+      reason: 'a one-tap unlock after leaving must not be possible',
+    );
+  });
+
+  testWidgets('an Immediately blur drops typed recovery answers', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await io(tester, () => session.setAutoLock(AutoLockMode.immediately));
+    await io(tester, session.lock);
+    await pumpApp(tester);
+
+    await tester.tap(find.byKey(const ValueKey('forgotPasswordButton')));
+    await tester.pump();
+    for (var i = 0; i < 3; i++) {
+      await tester.enterText(
+        find.byKey(ValueKey('recoveryAnswer${i + 1}')),
+        fixtureRecovery.answers[i],
+      );
+    }
+    await tester.pump();
+
+    await blur(tester);
+    await refocus(tester);
+
+    expect(session.phase, SessionPhase.locked);
+    expect(find.text('Recover your vault'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('forgotPasswordButton')));
+    await tester.pump();
+    for (var i = 0; i < 3; i++) {
+      final field = tester.widget<TextFormField>(
+        find.byKey(ValueKey('recoveryAnswer${i + 1}')),
+      );
+      expect(field.controller!.text, isEmpty);
+    }
+  });
+
+  testWidgets('a leaving on a setup form drops typed secrets', (tester) async {
+    await io(tester, session.load);
+    await pumpApp(tester);
+    expect(find.text('Create your password'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('passwordInput')),
+      'typed-secret-1',
+    );
+    await tester.pump();
+
+    await blur(tester);
+    await refocus(tester);
+
+    final field = tester.widget<TextFormField>(
+      find.byKey(const ValueKey('passwordInput')),
+    );
+    expect(
+      field.controller!.text,
+      isEmpty,
+      reason: 'setup has no saved policy and cold start is always locked',
+    );
+  });
+
+  testWidgets('a timed mode keeps typed secrets on a locked form', (
+    tester,
+  ) async {
+    await loadLocked(tester);
+    await pumpApp(tester);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('unlockPasswordInput')),
+      'typed-secret-1',
+    );
+    await tester.pump();
+
+    await blur(tester);
+    await refocus(tester);
+
+    final field = tester.widget<TextFormField>(
+      find.byKey(const ValueKey('unlockPasswordInput')),
+    );
+    expect(
+      field.controller!.text,
+      'typed-secret-1',
+      reason: 'a timed mode is not an Immediately leaving',
+    );
+  });
+
+  testWidgets('a locked session does not re-run the lock pipeline', (
     tester,
   ) async {
     await loadLocked(tester);
     await pumpApp(tester);
     final generation = session.lockGeneration;
 
-    native.emitFocus(false);
-    await tester.pump();
-    expect(session.lockGeneration, generation);
+    await blur(tester);
+    expect(
+      session.lockGeneration,
+      generation,
+      reason: 'a session with nothing to flush has no lock work to repeat',
+    );
 
     await refocus(tester);
     expect(native.shieldVisible, isFalse);
     expect(session.phase, SessionPhase.locked);
+  });
+
+  testWidgets('soft-keyboard typing holds a keyed form open', (tester) async {
+    await unlock(tester);
+    await io(tester, () async {
+      await session.lock();
+      await session.beginRecovery(fixtureRecovery.answers);
+    });
+    expect(session.phase, SessionPhase.recovering);
+    await pumpApp(tester);
+    expect(find.text('Create a new password'), findsOneWidget);
+
+    // One tap focuses the field; everything after arrives as IME input on the
+    // text-input channel, which no pointer or HardwareKeyboard handler sees.
+    await tester.tap(find.byKey(const ValueKey('newPasswordInput')));
+    await tester.pump();
+    for (var i = 0; i < 6; i++) {
+      tester.testTextInput.enterText('new-password-$i');
+      await tick(tester, const Duration(seconds: 11));
+    }
+
+    expect(
+      session.phase,
+      SessionPhase.recovering,
+      reason: '60+ seconds of typing is user activity, not inactivity',
+    );
+    expect(session.holdsSensitiveState, isTrue);
+    expect(native.shieldVisible, isFalse);
+    expect(find.text('Create a new password'), findsOneWidget);
   });
 
   testWidgets('a blur during the resume checks cannot leave the cover up', (
@@ -357,6 +557,54 @@ void main() {
     await refocus(tester);
     expect(native.shieldVisible, isFalse);
     expect(find.text('Unlock EnCryNote'), findsOneWidget);
+  });
+
+  testWidgets('a resume that never paints leaves the cover up, not stuck', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await pumpApp(tester);
+
+    // Minimized/occluded: the engine stops producing frames, so the resume
+    // cannot get a painted frame. It must give up and keep the cover.
+    await tester.binding.setSurfaceSize(const Size(1, 1));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.binding.scheduleFrame();
+    native.emitFocus(false);
+    await tester.pump();
+    native.emitFocus(true);
+    await tester.pump(
+      PrivacyLifecycle.frameWait + const Duration(milliseconds: 1),
+    );
+
+    expect(native.shieldVisible, isTrue);
+
+    // Frames resume: the next focus gain can uncover normally.
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    await refocus(tester);
+    expect(native.shieldVisible, isFalse);
+  });
+
+  testWidgets('a non-VaultException shield error does not poison the queue', (
+    tester,
+  ) async {
+    await unlock(tester);
+    await pumpApp(tester);
+
+    native.throwRawOnShield = true;
+    await blur(tester);
+    await refocus(tester);
+    // A later hide must still reach the bridge after that failure.
+    native.throwRawOnShield = false;
+    await refocus(tester);
+    await settle(tester);
+
+    expect(session.phase, SessionPhase.locked);
+    expect(
+      native.shieldCalls,
+      greaterThan(2),
+      reason: 'the queue kept accepting calls after the failure',
+    );
   });
 
   testWidgets('the bridge maps the shield call and focus stream', (

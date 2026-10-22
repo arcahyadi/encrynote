@@ -141,8 +141,8 @@ void main() {
     expect(session.canMutate, isFalse);
     expect(
       find.text(
-        'A change is not saved yet, so auto-lock cannot change until the '
-        'save succeeds.',
+        'A change is not saved yet. Auto-lock stays read-only until the save '
+        'succeeds.',
       ),
       findsOne,
     );
@@ -152,6 +152,36 @@ void main() {
 
     expect(session.autoLock, AutoLockMode.oneMinute);
     expect(find.textContaining('frozen draft'), findsNothing);
+  });
+
+  testWidgets('a failed policy save does not claim nothing changed', (
+    tester,
+  ) async {
+    await openUnlocked(tester);
+
+    native.failNextCommit = true;
+    await io(tester, () async {
+      // The debounce timer and the real commit only progress in the real zone.
+      final save = session.setAutoLock(AutoLockMode.tenMinutes);
+      await Future<void>.delayed(NoteSession.autosaveDebounce);
+      await expectLater(save, throwsA(isA<VaultException>()));
+    });
+    await tester.pumpAndSettle();
+
+    expect(session.autoLock, AutoLockMode.tenMinutes);
+    expect(session.phase, SessionPhase.storageError);
+    expect(
+      find.textContaining('Nothing was changed'),
+      findsNothing,
+      reason: 'the new policy is already enforced in memory',
+    );
+    expect(
+      find.text(
+        'A change is not saved yet. Auto-lock stays read-only until the save '
+        'succeeds.',
+      ),
+      findsOne,
+    );
   });
 
   testWidgets('a locked session cannot change the saved policy', (

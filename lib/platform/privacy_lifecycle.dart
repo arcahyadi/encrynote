@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../lock/idle_lock.dart';
+import '../lock/privacy_signals.dart';
 import '../session/note_session.dart';
 import '../vault/vault_types.dart';
 import 'native_bridge.dart';
@@ -21,11 +22,22 @@ class PrivacyLifecycle extends StatefulWidget {
     required this.session,
     required this.native,
     required this.child,
+    this.now,
+    this.elapsed,
   });
 
   final NoteSession session;
   final NativeBridge native;
   final Widget child;
+
+  /// How long a resume waits for a painted frame before leaving the cover up.
+  static const Duration frameWait = Duration(milliseconds: 250);
+
+  /// Clock injection for deterministic tests; production uses the wall clock.
+  final DateTime Function()? now;
+
+  /// Monotonic process timer injection; production uses a [Stopwatch].
+  final Duration Function()? elapsed;
 
   @override
   State<PrivacyLifecycle> createState() => _PrivacyLifecycleState();
@@ -33,7 +45,9 @@ class PrivacyLifecycle extends StatefulWidget {
 
 class _PrivacyLifecycleState extends State<PrivacyLifecycle>
     with WidgetsBindingObserver {
-  final Stopwatch _clock = Stopwatch()..start();
+  final Stopwatch _stopwatch = Stopwatch()..start();
+  final PrivacySignal _activitySignal = PrivacySignal();
+  final PrivacySignal _leavingSignal = PrivacySignal();
 
   IdleLock? _idle;
   StreamSubscription<bool>? _focusEvents;
@@ -58,6 +72,7 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_onKey);
+    _activitySignal.addListener(_onUserEdit);
     _session.addListener(_onSessionChanged);
     _focusEvents = widget.native.focusChanges.listen(
       _onNativeFocus,
@@ -93,6 +108,9 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onKey);
+    _activitySignal.removeListener(_onUserEdit);
+    _activitySignal.dispose();
+    _leavingSignal.dispose();
     _session.removeListener(_onSessionChanged);
     unawaited(_focusEvents?.cancel());
     _idle?.dispose();
@@ -101,6 +119,14 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
 
   @override
   Widget build(BuildContext context) {
+    return PrivacySignals(
+      activity: _activitySignal,
+      leavings: _leavingSignal,
+      child: _listener(),
+    );
+  }
+
+  Widget _listener() {
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (_) => _activity(),
@@ -132,6 +158,9 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
     return false;
   }
 
+  /// A field or the editor reported a real user edit (including IME input).
+  void _onUserEdit() => _activity();
+
   void _activity() {
     // Input while away, or while a resume is still checking the deadline, must
     // not restart the window it is about to be judged by.
@@ -156,8 +185,8 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
       final idle = _idle;
       if (idle == null) {
         _idle = IdleLock(
-          now: DateTime.now,
-          elapsed: () => _clock.elapsed,
+          now: widget.now ?? DateTime.now,
+          elapsed: widget.elapsed ?? () => _stopwatch.elapsed,
           onLock: _lockNow,
         )..setMode(mode);
         // A session that becomes lockable while the app is away (an unlock
@@ -188,6 +217,15 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
     // The one policy source: Immediately locks here, and a timed window keeps
     // counting. A session with nothing to hide has no [IdleLock] at all.
     await _idle?.focusChanged(false);
+    // An already-locked form holds typed secrets but no key, so no lock
+    // pipeline runs; the form still has to drop what the user typed. Setup has
+    // no saved policy to consult and cold start is always locked, so a leaving
+    // there drops them too. A timed policy on a locked form keeps them, exactly
+    // as it keeps an open session's window running.
+    if (_session.autoLock == AutoLockMode.immediately ||
+        _session.phase == SessionPhase.needsSetup) {
+      _leavingSignal.report();
+    }
   }
 
   /// Runs on every focus gain, including one this widget did not cause: the
@@ -205,8 +243,9 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
         // Deadline first: input and focus must never reset an overdue window.
         await _idle?.checkDeadline();
         // Only after the checks has a safe frame been built and painted.
-        await _nextFrame();
+        final painted = await _nextFrame();
         if (!mounted || !_focused || !_foreground) return;
+        if (!painted) return;
         if (epoch != _shieldEpoch) continue;
         _unshield();
         return;
@@ -218,10 +257,29 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
 
   /// Waits for one painted frame, scheduling it explicitly: [endOfFrame] alone
   /// does not request a frame when it is called from inside a frame callback.
-  Future<void> _nextFrame() {
+  ///
+  /// Bounded: a minimized or occluded window may stop producing frames, and an
+  /// unbounded wait would keep the cover up forever. Timing out leaves the
+  /// cover installed, which is the safe direction.
+  Future<bool> _nextFrame() {
     final binding = WidgetsBinding.instance;
     binding.scheduleFrame();
-    return binding.endOfFrame;
+    final painted = Completer<bool>();
+    late final Timer limit;
+    void finish(bool value) {
+      if (painted.isCompleted) return;
+      limit.cancel();
+      painted.complete(value);
+    }
+
+    limit = Timer(PrivacyLifecycle.frameWait, () => finish(false));
+    binding.endOfFrame.then(
+      (_) => finish(true),
+      onError: (Object _) {
+        finish(false);
+      },
+    );
+    return painted.future;
   }
 
   void _shield() {
@@ -241,6 +299,10 @@ class _PrivacyLifecycleState extends State<PrivacyLifecycle>
       } on VaultException {
         // Without a cover the window could be snapshotted with notes on
         // screen, so an install failure locks instead of trusting the platform.
+        if (visible) await _lockNow();
+      } on Object {
+        // Any other bridge failure must not poison the queue: every later call
+        // would otherwise be skipped and the cover would never move again.
         if (visible) await _lockNow();
       }
     });
