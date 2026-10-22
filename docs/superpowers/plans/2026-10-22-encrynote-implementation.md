@@ -42,7 +42,7 @@
 - [x] Task 3: Sesi, autosave, recovery, dan pengurutan perubahan.
 - [x] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
 - [x] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
-- [ ] Task 6: Daftar catatan dan editor Write/Preview yang benar-benar berfungsi.
+- [x] Task 6: Daftar catatan dan editor Write/Preview yang benar-benar berfungsi.
 - [ ] Task 7: Ekspor terenkripsi dan impor Markdown/encrypted export tanpa cache plaintext.
 - [ ] Task 8: Pemeriksaan lintas platform, offline, lisensi, dan panduan kontribusi.
 
@@ -200,7 +200,7 @@ expect(lockCalls, 1);
 
 **Interfaces:** `NotesScreen({required NoteSession session})`; `NoteEditor({required NoteSession session, required Note note})`. Gunakan `saveNote`, `deleteNote`, dan state sesi Task 3; tidak membuat penyimpanan lokal kedua atau key di widget.
 
-- [ ] **Step 1:** Tulis test gagal create/edit/delete-cancel/delete-confirm, urutan updatedAt, autosave, source tidak berubah setelah Preview, state kosong/loading/save error, dan layout pada lebar 360/720/1100 logical pixels. Assertions utama:
+- [x] **Step 1:** Tulis test gagal create/edit/delete-cancel/delete-confirm, urutan updatedAt, autosave, source tidak berubah setelah Preview, state kosong/loading/save error, dan layout pada lebar 360/720/1100 logical pixels. Assertions utama:
 
 ```dart
 await tester.tap(find.text('Preview'));
@@ -213,11 +213,11 @@ expect(tester.widget<TextField>(find.byKey(const ValueKey('markdownInput'))).con
 ```
 
   Uji Markdown berisi URL gambar, `file://`, path absolut/relatif dan asset reference dengan IO/network spies: tidak ada request atau pembacaan file. Link adalah teks selectable tanpa callback peluncuran. Test bahwa error save membekukan aksi mutasi dan tidak menampilkan Saved.
-- [ ] **Step 2:** Jalankan `flutter test test/notes` dan periksa kegagalan yang tepat.
-- [ ] **Step 3:** Implementasikan widget Material dan tambah `flutter_markdown_plus: ^1.0.12`. Pakai builder `img` yang selalu menampilkan string ARB `imageUnavailableOffline`; builder `a` menghasilkan teks selectable, bukan recognizer aktif. Tidak memakai WebView, `url_launcher`, `Image.network`, `Image.file`, atau default image loader. Setiap perubahan controller langsung diteruskan ke `saveNote`; debounce 500 ms dimiliki sesi Task 3. Lock/berpindah catatan harus menyimpan keystroke terakhir walaupun debounce belum berjalan.
-- [ ] **Step 4:** Daftar/editor berdampingan mulai lebar 720 logical pixels; di bawahnya gunakan navigasi daftar/detail. Gunakan scroll untuk teks panjang, focus yang terlihat, target sentuh >=44 logical pixels, serta test text scale 2x pada light/dark. Dispose controller saat lock; jangan mempertahankan judul/cuplikan pada layar terkunci.
+- [x] **Step 2:** Jalankan `flutter test test/notes` dan periksa kegagalan yang tepat.
+- [x] **Step 3:** Implementasikan widget Material dan tambah `flutter_markdown_plus: ^1.0.12`. Pakai builder `img` yang selalu menampilkan string ARB `imageUnavailableOffline`; builder `a` menghasilkan teks selectable, bukan recognizer aktif. Tidak memakai WebView, `url_launcher`, `Image.network`, `Image.file`, atau default image loader. Setiap perubahan controller langsung diteruskan ke `saveNote`; debounce 500 ms dimiliki sesi Task 3. Lock/berpindah catatan harus menyimpan keystroke terakhir walaupun debounce belum berjalan.
+- [x] **Step 4:** Daftar/editor berdampingan mulai lebar 720 logical pixels; di bawahnya gunakan navigasi daftar/detail. Gunakan scroll untuk teks panjang, focus yang terlihat, target sentuh >=44 logical pixels, serta test text scale 2x pada light/dark. Dispose controller saat lock; jangan mempertahankan judul/cuplikan pada layar terkunci.
 - [ ] **Step 5:** Jalankan `flutter test test/notes test/auth test/lock`, `flutter analyze`, dan klik seluruh aksi editor pada kedua platform yang tersedia. Pastikan error/empty state juga teruji, bukan hanya catatan contoh.
-- [ ] **Step 6:** Commit: `feat: add offline Markdown note editing and preview`.
+- [x] **Step 6:** Commit: `feat: add offline Markdown note editing and preview`.
 
 ### Task 7: Transfer tanpa plaintext cache
 
