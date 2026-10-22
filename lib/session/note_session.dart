@@ -54,6 +54,10 @@ class NoteSession extends ChangeNotifier {
   int _sealedAt = 0;
   bool _failed = false;
   bool _uncertain = false;
+
+  /// A lock was requested while accepted edits had no sealed snapshot yet.
+  /// A successful retry must finish locked instead of adopting the key again.
+  bool _lockRequested = false;
   int _epoch = 0;
   int _busy = 0;
   int _lockGeneration = 0;
@@ -67,10 +71,13 @@ class NoteSession extends ChangeNotifier {
 
   FailureCode? get failure => _failure;
 
-  /// Note contents are exposed only while the session is usable. A locked or
-  /// recovering session never hands notes to the UI.
+  /// Note contents are exposed only while the session is usable. A locked,
+  /// recovering, or lock-intent-frozen session never hands notes to the UI.
   VaultData? get data => switch (_phase) {
-    SessionPhase.unlocked || SessionPhase.storageError => _data,
+    SessionPhase.unlocked => _data,
+    // A failed save keeps the draft visible for its retry; a failed lock
+    // intent redacts it even though the key is retained for that retry.
+    SessionPhase.storageError => _lockRequested ? null : _data,
     _ => null,
   };
 
@@ -147,6 +154,7 @@ class NoteSession extends ChangeNotifier {
         _revision = 0;
         _failure = null;
         _failed = false;
+        _lockRequested = false;
         _autoLock = AutoLockMode.oneMinute;
         _notify();
       });
@@ -373,11 +381,10 @@ class NoteSession extends ChangeNotifier {
   /// Writes the newest accepted edit now instead of waiting for the debounce.
   ///
   /// A screen switch flushes through here so the last keystroke is sealed
-  /// before the controllers that produced it are disposed. A failure is
-  /// recorded by the normal write path and freezes the session; it is not
-  /// reported as success.
+  /// before the controllers that produced it are disposed. A frozen session
+  /// never retries here: the retry surface owns that decision.
   Future<void> flushSave() async {
-    if (_phase != SessionPhase.unlocked) return;
+    if (!canMutate) return;
     if (_debounce == null && _sealedAt >= _accepted) return;
     _debounce?.cancel();
     _debounce = null;
@@ -411,6 +418,9 @@ class NoteSession extends ChangeNotifier {
         if (_failed || _pending != null) {
           throw VaultException(_failure ?? FailureCode.storage, 'commit');
         }
+        // A lock requested before the failed seal still stands: finishing the
+        // retry must end locked, never hand the key back without the password.
+        if (_lockRequested) _finishLock();
       });
     } on VaultException catch (error) {
       _failure = error.code;
@@ -451,6 +461,7 @@ class NoteSession extends ChangeNotifier {
     _phase = SessionPhase.locked;
     _lockGeneration++;
     _failure = null;
+    _lockRequested = true;
     _debounce?.cancel();
     _debounce = null;
     _notify();
@@ -465,14 +476,18 @@ class NoteSession extends ChangeNotifier {
         _failed = true;
         _failWaiters(error);
       } finally {
-        if (_pending != null) _failure ??= FailureCode.storage;
-        _vault = null;
-        _recovery = null;
-        _recoveryData = null;
-        _data = null;
-        // Only the sealed ciphertext may wait for a retry after lock.
-        _pendingData = null;
-        _notify();
+        // An accepted edit that never became ciphertext cannot survive a
+        // dropped key. Keep the key and the redacted notes, and show the save
+        // retry surface instead of claiming a key-free lock.
+        if (_sealedAt < _accepted) {
+          _failure ??= FailureCode.storage;
+          _failed = true;
+          _phase = SessionPhase.storageError;
+          _notify();
+        } else {
+          if (_pending != null) _failure ??= FailureCode.storage;
+          _finishLock();
+        }
       }
     });
   }
@@ -505,11 +520,25 @@ class NoteSession extends ChangeNotifier {
     );
   }
 
+  /// Drops every key and plaintext copy once the lock's accepted edits are all
+  /// sealed; only retryable ciphertext may wait after this.
+  void _finishLock() {
+    _vault = null;
+    _recovery = null;
+    _recoveryData = null;
+    _data = null;
+    _pendingData = null;
+    _lockRequested = false;
+    _phase = SessionPhase.locked;
+    _notify();
+  }
+
   @override
   void dispose() {
     // Dropping a timer with accepted edits still inside the debounce window
-    // would discard the last keystroke, so flush it now.
-    if (_debounce != null && _sealedAt < _accepted) {
+    // would discard the last keystroke, so flush it now. A frozen session is
+    // left to its retry surface; dispose must not silently retry it.
+    if (_debounce != null && _sealedAt < _accepted && canMutate) {
       _debounce!.cancel();
       _debounce = null;
       unawaited(_enqueue(_flush));
@@ -582,6 +611,11 @@ class NoteSession extends ChangeNotifier {
           _failure = error.code;
           _failed = true;
           _failWaiters(error);
+          // A seal failure is a save failure: the sanctioned retry surface must
+          // replace the editor instead of leaving it unlocked and inert.
+          if (_phase == SessionPhase.unlocked) {
+            _phase = SessionPhase.storageError;
+          }
           _notify();
           return;
         }
@@ -599,6 +633,9 @@ class NoteSession extends ChangeNotifier {
       _failure = error.code;
       _failed = true;
       _failWaiters(error);
+      if (_phase == SessionPhase.unlocked) {
+        _phase = SessionPhase.storageError;
+      }
       _notify();
     }
   }
@@ -629,7 +666,9 @@ class NoteSession extends ChangeNotifier {
           revision: revision,
         );
       }
-      if (epoch == _epoch && _phase == SessionPhase.storageError) {
+      if (epoch == _epoch &&
+          _phase == SessionPhase.storageError &&
+          !_lockRequested) {
         _phase = SessionPhase.unlocked;
       }
       _completeWaiters(_sealedAt);
@@ -678,7 +717,9 @@ class NoteSession extends ChangeNotifier {
       _completeWaiters(_sealedAt);
       // Only a session that still holds the key may present itself as open;
       // after a lock this reconcile just settles the ciphertext.
-      if (_phase == SessionPhase.storageError && _vault != null) {
+      if (_phase == SessionPhase.storageError &&
+          _vault != null &&
+          !_lockRequested) {
         _phase = SessionPhase.unlocked;
       }
       _notify();
@@ -703,6 +744,7 @@ class NoteSession extends ChangeNotifier {
       _sealedAt = 0;
       _failed = false;
       _uncertain = false;
+      _lockRequested = false;
       _phase = SessionPhase.locked;
       _notify();
       return;
@@ -721,6 +763,7 @@ class NoteSession extends ChangeNotifier {
     _sealedAt = 0;
     _failed = false;
     _uncertain = false;
+    _lockRequested = false;
     _failure = null;
     _phase = SessionPhase.unlocked;
     _notify();

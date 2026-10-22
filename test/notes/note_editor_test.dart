@@ -29,7 +29,10 @@ class _SpyHttpOverrides extends HttpOverrides {
 class _LimitCrypto extends VaultCrypto {
   @override
   void checkSnapshotFits(UnlockedVault vault, VaultData data, int revision) {
-    if (data.notes.any((note) => note.markdown.contains('TOO BIG'))) {
+    if (data.notes.any(
+      (note) =>
+          note.markdown.contains('TOO BIG') || note.title.contains('TOO BIG'),
+    )) {
       throw const VaultException(FailureCode.limit, 'payload');
     }
     super.checkSnapshotFits(vault, data, revision);
@@ -293,7 +296,7 @@ void main() {
     await settleSave(tester);
   });
 
-  testWidgets('a rejected over-limit draft is not accepted or shown as saved', (
+  testWidgets('a rejected over-limit draft restores the last accepted source', (
     tester,
   ) async {
     await openVault(tester, using: limited);
@@ -324,8 +327,8 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('markdownInput')))
           .controller!
           .text,
-      'TOO BIG',
-      reason: 'the draft stays visible so the user can shorten it',
+      accepted,
+      reason: 'the rejected draft is restored to the last accepted value',
     );
 
     await tester.enterText(
@@ -337,6 +340,76 @@ void main() {
     expect(limited.data!.notes.single.markdown, 'small again');
     expect(find.text('This note is too large to save.'), findsNothing);
     expect(find.text('Saved'), findsOneWidget);
+  });
+
+  testWidgets('a rejected over-limit title restores the last accepted title', (
+    tester,
+  ) async {
+    await openVault(tester, using: limited);
+    await pumpEditor(tester, using: limited);
+
+    final accepted = limited.data!.notes.single.title;
+    await tester.enterText(
+      find.byKey(const ValueKey('titleInput')),
+      'TOO BIG TITLE',
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(limited.data!.notes.single.title, accepted);
+    expect(find.text('This note is too large to save.'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('titleInput')))
+          .controller!
+          .text,
+      accepted,
+    );
+    expect(find.text('Saved'), findsNothing);
+  });
+
+  testWidgets('the editor keeps cursor and Preview after a rejected draft', (
+    tester,
+  ) async {
+    await openVault(tester, using: limited);
+    await pumpEditor(tester, using: limited);
+
+    // A normal edit keeps the caret where the user left it and does not toggle
+    // the view; only a rejected draft resets the source.
+    await tester.enterText(
+      find.byKey(const ValueKey('markdownInput')),
+      'accepted body',
+    );
+    await tester.pump();
+    await settleSave(tester);
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('markdownInput')),
+    );
+    expect(field.controller!.selection.baseOffset, 'accepted body'.length);
+
+    await tester.tap(find.text('Preview'));
+    await tester.pumpAndSettle();
+    expect(find.text('accepted body'), findsOneWidget);
+
+    await tester.tap(find.text('Write'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('markdownInput')))
+          .controller!
+          .text,
+      'accepted body',
+      reason: 'Preview never mutates the source',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('markdownInput')))
+          .controller!
+          .selection
+          .baseOffset,
+      'accepted body'.length,
+      reason: 'a normal save leaves the cursor alone',
+    );
   });
 
   testWidgets('the editor scrolls and stays usable at 360 with 2x text', (

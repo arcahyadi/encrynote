@@ -109,14 +109,40 @@ class _NoteEditorState extends State<NoteEditor> {
           .catchError((Object error) {
             if (!mounted || generation != _saveGeneration) return;
             if (widget.session.phase != SessionPhase.unlocked) return;
+            final rejected =
+                error is VaultException && error.code == FailureCode.limit;
+            if (rejected) _restoreAccepted();
             setState(() {
               _saved = false;
-              _error =
-                  error is VaultException && error.code == FailureCode.limit
-                  ? l10n.noteTooLarge
-                  : l10n.noteSaveFailed;
+              _error = rejected ? l10n.noteTooLarge : l10n.noteSaveFailed;
             });
           }),
+    );
+  }
+
+  /// Puts the last accepted title and source back after a rejected draft.
+  ///
+  /// The session never accepted the draft, so the stored note is the only copy
+  /// that survives; keeping the rejected text would silently disagree with what
+  /// is actually saved. Assigning `value` does not fire `onChanged`, so this
+  /// produces neither a save nor an activity signal.
+  void _restoreAccepted() {
+    var accepted = widget.note;
+    for (final note in widget.session.data?.notes ?? const <Note>[]) {
+      if (note.id == widget.note.id) {
+        accepted = note;
+        break;
+      }
+    }
+    _setText(_title, accepted.title);
+    _setText(_markdown, accepted.markdown);
+  }
+
+  void _setText(TextEditingController controller, String text) {
+    if (controller.text == text) return;
+    controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 

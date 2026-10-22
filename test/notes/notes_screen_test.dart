@@ -14,6 +14,7 @@ import 'package:hello_flutter/vault/vault_types.dart';
 
 import '../support/fake_native_bridge.dart';
 import '../support/fixtures.dart';
+import '../support/seal_failure_crypto.dart';
 
 /// The real notes surface: list, CRUD, autosave, layout and lock behaviour.
 ///
@@ -28,6 +29,8 @@ void main() {
   late Directory dir;
   late FakeNativeBridge native;
   late NoteSession session;
+  late SealFailureCrypto sealCrypto;
+  late NoteSession sealSession;
   var scratch = 0;
 
   setUpAll(() async {
@@ -60,10 +63,17 @@ void main() {
       crypto: crypto,
       store: VaultStore(directory: dir, native: native),
     );
+    // Built here so its store queue lives in the real zone.
+    sealCrypto = SealFailureCrypto();
+    sealSession = NoteSession(
+      crypto: sealCrypto,
+      store: VaultStore(directory: dir, native: native),
+    );
   });
 
   tearDown(() {
     session.dispose();
+    sealSession.dispose();
   });
 
   Future<T> io<T>(WidgetTester tester, Future<T> Function() body) async {
@@ -79,6 +89,15 @@ void main() {
       await session.unlock(localPassword);
     });
     expect(session.phase, SessionPhase.unlocked);
+  }
+
+  Future<void> openSealVault(WidgetTester tester) async {
+    await io(tester, () async {
+      await File('${dir.path}/vault.enc').writeAsBytes(seed);
+      await sealSession.load();
+      await sealSession.unlock(localPassword);
+    });
+    expect(sealSession.phase, SessionPhase.unlocked);
   }
 
   void useSize(WidgetTester tester, Size size) {
@@ -620,6 +639,175 @@ void main() {
         reason: '$key is a real touch target',
       );
     }
+  });
+
+  testWidgets('a seal failure shows the retry surface, not a dead editor', (
+    tester,
+  ) async {
+    await openSealVault(tester);
+    useSize(tester, const Size(800, 1200));
+    await tester.pumpWidget(EnCryNoteApp(session: sealSession));
+    await tester.pump();
+    await tester.tap(
+      find.byKey(ValueKey('noteTile:${fixtureData.notes.single.id}')),
+    );
+    await tester.pump();
+
+    sealCrypto.failSeal = true;
+    await tester.enterText(
+      find.byKey(const ValueKey('markdownInput')),
+      '# unsealed edit',
+    );
+    await tester.pump();
+    await tester.pump(NoteSession.autosaveDebounce);
+    for (var i = 0; i < 50; i++) {
+      if (sealSession.phase == SessionPhase.storageError) break;
+      await io(
+        tester,
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    await tester.pump();
+
+    expect(sealSession.phase, SessionPhase.storageError);
+    expect(sealSession.canMutate, isFalse);
+    expect(find.text('Your last change is not saved yet'), findsOneWidget);
+    expect(find.byKey(const ValueKey('markdownInput')), findsNothing);
+    expect(find.byKey(const ValueKey('newNoteButton')), findsNothing);
+    expect(find.text('Saved'), findsNothing);
+
+    // Navigation cannot quietly retry the seal; only the retry button may.
+    final attempts = sealCrypto.sealAttempts;
+    await io(tester, sealSession.flushSave);
+    expect(sealCrypto.sealAttempts, attempts);
+
+    sealCrypto.failSeal = false;
+    await tester.tap(find.byKey(const ValueKey('retryButton')));
+    await tester.pump();
+    for (var i = 0; i < 100; i++) {
+      if (sealSession.phase == SessionPhase.unlocked) break;
+      await io(
+        tester,
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    await tester.pump();
+
+    expect(sealSession.phase, SessionPhase.unlocked);
+    expect(
+      sealSession.data!.notes.single.markdown,
+      '# unsealed edit',
+      reason: 'the retried seal covers the edit that failed',
+    );
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
+  });
+
+  testWidgets('lock after a seal failure retries into a locked vault', (
+    tester,
+  ) async {
+    await openSealVault(tester);
+    useSize(tester, const Size(800, 1200));
+    await tester.pumpWidget(EnCryNoteApp(session: sealSession));
+    await tester.pump();
+    await tester.tap(
+      find.byKey(ValueKey('noteTile:${fixtureData.notes.single.id}')),
+    );
+    await tester.pump();
+
+    sealCrypto.failSeal = true;
+    await tester.enterText(
+      find.byKey(const ValueKey('markdownInput')),
+      '# must not be lost',
+    );
+    await tester.pump();
+    await tester.pump(NoteSession.autosaveDebounce);
+    for (var i = 0; i < 50; i++) {
+      if (sealSession.phase == SessionPhase.storageError) break;
+      await io(
+        tester,
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    await tester.pump();
+    expect(sealSession.phase, SessionPhase.storageError);
+
+    // The lock cannot drop the key while an accepted edit is unsealed.
+    await io(tester, sealSession.lock);
+    await tester.pump();
+
+    expect(sealSession.phase, SessionPhase.storageError);
+    expect(sealSession.data, isNull, reason: 'the lock intent redacts notes');
+    expect(sealSession.holdsSensitiveState, isTrue);
+    expect(find.text('Your last change is not saved yet'), findsOneWidget);
+    expect(find.textContaining('must not be lost'), findsNothing);
+    expect(find.text('Unlock EnCryNote'), findsNothing);
+
+    // Retry seals the edit, then the earlier lock intent completes locked.
+    sealCrypto.failSeal = false;
+    await tester.tap(find.byKey(const ValueKey('retryButton')));
+    await tester.pump();
+    for (var i = 0; i < 100; i++) {
+      if (sealSession.phase == SessionPhase.locked) break;
+      await io(
+        tester,
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    await tester.pump();
+
+    expect(sealSession.phase, SessionPhase.locked);
+    expect(sealSession.holdsSensitiveState, isFalse);
+    expect(find.text('Unlock EnCryNote'), findsOneWidget);
+    expect(find.text('Your last change is not saved yet'), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('unlockPasswordInput')),
+      localPassword,
+    );
+    await tester.tap(find.byKey(const ValueKey('unlockButton')));
+    await tester.pump();
+    for (var i = 0; i < 100; i++) {
+      if (sealSession.phase == SessionPhase.unlocked) break;
+      await io(
+        tester,
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    await tester.pump();
+
+    expect(sealSession.phase, SessionPhase.unlocked);
+    expect(sealSession.data!.notes.single.markdown, '# must not be lost');
+  });
+
+  testWidgets('an over-limit draft is rejected without a save error surface', (
+    tester,
+  ) async {
+    await openVault(tester);
+    await pumpNotes(tester);
+    await openFixtureNote(tester);
+
+    // Real payload-limit rejection: the session keeps its state and the editor
+    // restores what is actually stored.
+    await tester.enterText(
+      find.byKey(const ValueKey('markdownInput')),
+      'x' * (maxPayloadBytes + 1),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(session.phase, SessionPhase.unlocked);
+    expect(session.canMutate, isTrue);
+    expect(find.text('This note is too large to save.'), findsOneWidget);
+    expect(find.text('Saved'), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('markdownInput')))
+          .controller!
+          .text,
+      fixtureData.notes.single.markdown,
+      reason: 'the rejected draft is restored, not kept as a phantom',
+    );
+    expect(find.byKey(const ValueKey('markdownInput')), findsOneWidget);
   });
 
   testWidgets('the app still shows loading before any notes surface', (

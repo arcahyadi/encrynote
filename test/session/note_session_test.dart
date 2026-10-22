@@ -10,6 +10,7 @@ import 'package:hello_flutter/vault/vault_types.dart';
 
 import '../support/fake_native_bridge.dart';
 import '../support/fixtures.dart';
+import '../support/seal_failure_crypto.dart';
 
 Matcher _rejectedAs(FailureCode code) =>
     throwsA(isA<VaultException>().having((e) => e.code, 'code', code));
@@ -215,6 +216,152 @@ void main() {
     expect(session.data, isNull);
     expect(session.canMutate, isFalse);
   });
+
+  test(
+    'a seal failure exposes the save retry surface and freezes edits',
+    () async {
+      final failing = SealFailureCrypto();
+      final sealed = NoteSession(
+        crypto: failing,
+        store: VaultStore(directory: dir, native: native),
+      );
+      addTearDown(sealed.dispose);
+      await seedVault();
+      await sealed.load();
+      await sealed.unlock(localPassword);
+
+      failing.failSeal = true;
+      final edited = sealed.data!.notes.single.copyWith(markdown: 'unsealed');
+      await expectLater(
+        sealed.saveNote(edited),
+        throwsA(
+          isA<VaultException>().having(
+            (e) => e.code,
+            'code',
+            FailureCode.storage,
+          ),
+        ),
+      );
+      await Future<void>.delayed(NoteSession.autosaveDebounce);
+
+      expect(
+        sealed.phase,
+        SessionPhase.storageError,
+        reason: 'a seal failure must show the sanctioned retry surface',
+      );
+      expect(sealed.canMutate, isFalse);
+      expect(sealed.needsReload, isFalse);
+      expect(sealed.failure, FailureCode.storage);
+      expect(
+        sealed.holdsSensitiveState,
+        isTrue,
+        reason: 'the unsealed edit still needs its key to be retried',
+      );
+      expect(sealed.data!.notes.single.markdown, 'unsealed');
+
+      // Navigation/flush must not secretly retry a frozen seal.
+      final attempts = failing.sealAttempts;
+      await sealed.flushSave();
+      expect(failing.sealAttempts, attempts);
+      expect(sealed.phase, SessionPhase.storageError);
+
+      // Only the retry surface resolves it, and a plain save failure reopens.
+      failing.failSeal = false;
+      await sealed.retrySave();
+      expect(sealed.phase, SessionPhase.unlocked);
+      expect(sealed.data!.notes.single.markdown, 'unsealed');
+      expect(sealed.canMutate, isTrue);
+    },
+  );
+
+  test(
+    'a seal failure during lock keeps the unsaved edit and stays truthful',
+    () async {
+      final failing = SealFailureCrypto();
+      final sealed = NoteSession(
+        crypto: failing,
+        store: VaultStore(directory: dir, native: native),
+      );
+      addTearDown(sealed.dispose);
+      await seedVault();
+      await sealed.load();
+      await sealed.unlock(localPassword);
+
+      failing.failSeal = true;
+      await expectLater(
+        sealed.saveNote(sealed.data!.notes.single.copyWith(markdown: 'kept')),
+        throwsA(isA<VaultException>()),
+      );
+      await sealed.lock();
+
+      expect(
+        sealed.phase,
+        SessionPhase.storageError,
+        reason: 'the key cannot be dropped while an accepted edit is unsealed',
+      );
+      expect(sealed.failure, FailureCode.storage);
+      expect(sealed.data, isNull, reason: 'a lock intent redacts note content');
+      expect(
+        sealed.holdsSensitiveState,
+        isTrue,
+        reason: 'the unsaved edit is retained with its key for retry',
+      );
+
+      // The retry succeeds, but the earlier lock intent must finish locked.
+      failing.failSeal = false;
+      await sealed.retrySave();
+
+      expect(
+        sealed.phase,
+        SessionPhase.locked,
+        reason: 'retry must not unlock without the password',
+      );
+      expect(sealed.data, isNull);
+      expect(sealed.holdsSensitiveState, isFalse);
+
+      await expectLater(
+        sealed.unlock('wrong-password'),
+        _rejectedAs(FailureCode.credentials),
+      );
+      await sealed.unlock(localPassword);
+      expect(sealed.data!.notes.single.markdown, 'kept');
+    },
+  );
+
+  test(
+    'a successful lock flush still finishes locked after a seal failure',
+    () async {
+      final failing = SealFailureCrypto();
+      final sealed = NoteSession(
+        crypto: failing,
+        store: VaultStore(directory: dir, native: native),
+      );
+      addTearDown(sealed.dispose);
+      await seedVault();
+      await sealed.load();
+      await sealed.unlock(localPassword);
+
+      failing.failSeal = true;
+      await expectLater(
+        sealed.saveNote(
+          sealed.data!.notes.single.copyWith(markdown: 'retry me'),
+        ),
+        throwsA(isA<VaultException>()),
+      );
+      expect(sealed.phase, SessionPhase.storageError);
+
+      // A later lock can seal successfully; it must complete the lock.
+      failing.failSeal = false;
+      await sealed.lock();
+
+      expect(sealed.phase, SessionPhase.locked);
+      expect(sealed.data, isNull);
+      expect(sealed.holdsSensitiveState, isFalse);
+
+      await sealed.unlock(localPassword);
+      expect(sealed.data!.notes.single.markdown, 'retry me');
+    },
+  );
 
   test('flushSave writes the last accepted edit before the debounce', () async {
     await unlockSeeded();
