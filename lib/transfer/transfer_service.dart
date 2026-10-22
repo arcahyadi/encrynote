@@ -7,13 +7,19 @@ import '../session/note_session.dart';
 import '../vault/vault_crypto.dart';
 import '../vault/vault_types.dart';
 
+/// How far an import has progressed, so the UI can be honest about what a
+/// cancel can still stop. Reading and decrypting are cancellable; the vault
+/// commit is not.
+enum ImportStage { idle, reading, committing }
+
 /// Import and export of notes through the session and the native file picker.
 ///
 /// Export prepares the whole ciphertext before the native save panel opens, so
 /// the password and note plaintext are released before the OS dialog can take
 /// focus. Import keeps only the opaque native handle across a lock: the handle
 /// outlives the widget tree, while the bytes are read and decrypted only after
-/// the session is unlocked again. A failed batch never reaches session state.
+/// the session is unlocked again. A cancelled or failed batch never reaches
+/// session state.
 class TransferService extends ChangeNotifier {
   TransferService({
     required NoteSession session,
@@ -39,6 +45,19 @@ class TransferService extends ChangeNotifier {
   PickedImport? _pending;
   bool _disposed = false;
 
+  /// Incremented by every cancel. An import that was cancelled while its bytes
+  /// were still being read or decrypted sees the change and never commits.
+  int _cancelGeneration = 0;
+
+  /// Tokens already released, so one handle is released exactly once no matter
+  /// how many paths (button, dismissal, failure, dispose) reach for it.
+  final Set<String> _released = <String>{};
+
+  ImportStage _stage = ImportStage.idle;
+
+  /// Where the current import is; [ImportStage.committing] is not cancellable.
+  ImportStage get importStage => _stage;
+
   /// The selection a lock interrupted, kept so an unlock can offer to resume it
   /// without reopening the picker. Holds no plaintext and no password.
   PickedImport? get pendingImport => _pending;
@@ -46,18 +65,22 @@ class TransferService extends ChangeNotifier {
   /// Writes every note into a new export envelope and hands only ciphertext to
   /// the native save panel. Returns `false` when the user cancelled the save.
   ///
-  /// The save panel opens only after the ciphertext exists. The frame that
-  /// reads and seals the notes returns before the panel opens, so no note list
-  /// stays reachable while the OS dialog has focus. Dart cannot promise a
-  /// password string is physically erased, so the dialog also drops its own
-  /// fields before calling in.
+  /// The save panel opens only after the ciphertext exists. This frame drops its
+  /// own password reference before that await, so nothing in Dart holds the
+  /// password while the OS dialog has focus. Strings cannot be zeroized, so this
+  /// is a best-effort reference release, not a memory-erasure claim.
   Future<bool> exportNotes(String password) async {
-    final bytes = await _sealedExport(password);
+    final bytes = await _sealNotes(password);
+    // Drops the only reference this frame keeps to the original string.
+    password = '';
     return _native.saveExport(bytes, fileName: _exportFileName());
   }
 
   /// Flushes the last keystroke, re-checks authority, and seals the snapshot.
-  Future<Uint8List> _sealedExport(String password) async {
+  ///
+  /// Returns before the native panel opens, so neither the note list nor the
+  /// password outlives this call's frame.
+  Future<Uint8List> _sealNotes(String password) async {
     if (!validPassword(password)) {
       throw const VaultException(FailureCode.credentials, 'password.length');
     }
@@ -83,17 +106,27 @@ class TransferService extends ChangeNotifier {
   /// Imports [picked] as one atomic batch of new notes.
   ///
   /// On any failure the existing notes are untouched, the handle is released,
-  /// and nothing from the batch is left for an autosave retry.
+  /// and nothing from the batch is left for an autosave retry. A cancel that
+  /// lands while the bytes are still being read or decrypted stops the batch
+  /// before it reaches the session.
   Future<void> importPicked(
     PickedImport picked, {
     String? exportPassword,
   }) async {
     _requireUnlocked();
+    final generation = _cancelGeneration;
     try {
+      _setStage(ImportStage.reading);
       final notes = await _readNotes(picked, exportPassword);
+      if (generation != _cancelGeneration) {
+        throw const VaultException(FailureCode.busy, 'import.cancelled');
+      }
       _requireUnlocked();
+      // From here the batch is one vault commit; cancelling would be a lie.
+      _setStage(ImportStage.committing);
       await _session.appendImported(notes);
     } finally {
+      _setStage(ImportStage.idle);
       await _release(picked.token);
       if (_pending?.token == picked.token) {
         _pending = null;
@@ -103,7 +136,12 @@ class TransferService extends ChangeNotifier {
   }
 
   /// Drops the pending handle without reading or changing anything.
+  ///
+  /// A commit already in progress is not cancellable, so this is a no-op then;
+  /// the caller's UI disables the action at that point instead of pretending.
   Future<void> cancelImport() async {
+    if (_stage == ImportStage.committing) return;
+    _cancelGeneration++;
     await _releasePending();
     _notify();
   }
@@ -179,7 +217,15 @@ class TransferService extends ChangeNotifier {
     if (pending != null) await _release(pending.token);
   }
 
+  void _setStage(ImportStage stage) {
+    if (_stage == stage) return;
+    _stage = stage;
+    _notify();
+  }
+
+  /// Releases one token at most once, whichever path asks first.
   Future<void> _release(String token) async {
+    if (!_released.add(token)) return;
     try {
       await _native.releaseImport(token);
     } on Object {
@@ -202,7 +248,7 @@ class TransferService extends ChangeNotifier {
     _disposed = true;
     final pending = _pending;
     _pending = null;
-    if (pending != null) {
+    if (pending != null && _released.add(pending.token)) {
       // Best effort: the native side also drops grants when the app goes away.
       _native.releaseImport(pending.token).catchError((Object _) {});
     }

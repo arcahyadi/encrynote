@@ -78,6 +78,9 @@ class FakeNativeBridge implements NativeBridge {
   /// Holds the open panel until completed, so a lock can land while it is up.
   Completer<void>? pickGate;
 
+  /// Holds a read open, so a cancel or a lock can land mid-read.
+  Completer<void>? readGate;
+
   int pickCalls = 0;
   final List<String> readTokens = [];
   final List<int> readLimits = [];
@@ -97,6 +100,8 @@ class FakeNativeBridge implements NativeBridge {
   Future<Uint8List> readImport(String token, {required int maxBytes}) async {
     readTokens.add(token);
     readLimits.add(maxBytes);
+    final gate = readGate;
+    if (gate != null) await gate.future;
     if (failRead) {
       failRead = false;
       throw const VaultException(FailureCode.storage, 'read.failed');

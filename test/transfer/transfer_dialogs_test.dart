@@ -257,6 +257,58 @@ void main() {
       expect(session.data!.notes, hasLength(1));
       expect(native.commitCount, 0);
     });
+
+    testWidgets('the save panel opens only after the ciphertext exists', (
+      tester,
+    ) async {
+      native.saveGate = Completer<void>();
+      await pumpHost(
+        tester,
+        open: (context) => showExportDialog(context, transfer),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('exportPasswordInput')),
+        'export-1234',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('confirmExportPasswordInput')),
+        'export-1234',
+      );
+      await tester.tap(find.byKey(const ValueKey('confirmExportButton')));
+      for (var i = 0; i < 200 && native.savedExport == null; i++) {
+        await io(
+          tester,
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+
+      // While the panel is up, the dialog holds no password field and no note
+      // text, and the bytes handed over are already an export envelope.
+      expect(native.savedExport, isNotNull);
+      expect(find.byKey(const ValueKey('exportPasswordInput')), findsNothing);
+      expect(find.text('export-1234'), findsNothing);
+      expect(find.text(fixtureData.notes.single.markdown), findsNothing);
+      final saved = native.savedExport!;
+      expect(
+        utf8.decode(saved, allowMalformed: true).contains('export-1234'),
+        isFalse,
+      );
+
+      // Escape and back cannot recall a save the native panel already owns.
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.text('Export notes'), findsOneWidget);
+
+      native.saveGate!.complete();
+      await settle(tester);
+      expect(find.text('Export notes'), findsNothing);
+      final notes = await io(
+        tester,
+        () => crypto.importExport(saved, 'export-1234'),
+      );
+      expect(notes.single.markdown, fixtureData.notes.single.markdown);
+    });
   });
 
   group('import dialog', () {
@@ -388,6 +440,149 @@ void main() {
       expect(native.released, isEmpty, reason: 'the handle survives the lock');
       expect(session.data, isNull);
     });
+
+    testWidgets('a barrier tap cancels the selection exactly once', (
+      tester,
+    ) async {
+      native.nextPicked = const PickedImport(
+        token: 'md-8',
+        name: 'dismissed.md',
+      );
+      native.importBytes = Uint8List.fromList(utf8.encode('dismissed body'));
+
+      await pumpHost(
+        tester,
+        open: (context) => showImportDialog(context, transfer),
+      );
+      await settle(tester);
+      expect(find.text('dismissed.md'), findsOneWidget);
+
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+
+      expect(find.text('Import notes'), findsNothing);
+      expect(native.released, ['md-8'], reason: 'released exactly once');
+      expect(transfer.pendingImport, isNull);
+      expect(session.data!.notes, hasLength(1));
+      expect(native.readTokens, isEmpty);
+      expect(native.commitCount, 0);
+    });
+
+    testWidgets('Android back cancels the selection exactly once', (
+      tester,
+    ) async {
+      native.nextPicked = const PickedImport(token: 'md-9', name: 'backed.md');
+      native.importBytes = Uint8List.fromList(utf8.encode('back body'));
+
+      await pumpHost(
+        tester,
+        open: (context) => showImportDialog(context, transfer),
+      );
+      await settle(tester);
+      expect(find.text('backed.md'), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+
+      expect(find.text('Import notes'), findsNothing);
+      expect(native.released, ['md-9'], reason: 'released exactly once');
+      expect(transfer.pendingImport, isNull);
+      expect(session.data!.notes, hasLength(1));
+      expect(native.readTokens, isEmpty);
+      expect(native.commitCount, 0);
+    });
+
+    testWidgets('a dismissed selection is not offered again on the next open', (
+      tester,
+    ) async {
+      native.nextPicked = const PickedImport(token: 'md-10', name: 'gone.md');
+      native.importBytes = Uint8List.fromList(utf8.encode('gone body'));
+
+      await pumpHost(
+        tester,
+        open: (context) => showImportDialog(context, transfer),
+      );
+      await settle(tester);
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+      expect(transfer.pendingImport, isNull);
+
+      // A fresh open must ask the picker again, not resurrect the old file.
+      native.nextPicked = const PickedImport(token: 'md-11', name: 'fresh.md');
+      await tester.tap(find.text('open'));
+      await settle(tester);
+
+      expect(find.text('fresh.md'), findsOneWidget);
+      expect(find.text('gone.md'), findsNothing);
+      expect(native.pickCalls, 2);
+      expect(native.released, ['md-10']);
+    });
+
+    testWidgets('cancelling during a read releases once and commits nothing', (
+      tester,
+    ) async {
+      native.nextPicked = const PickedImport(token: 'md-12', name: 'slow.md');
+      native.importBytes = Uint8List.fromList(utf8.encode('slow body'));
+      native.readGate = Completer<void>();
+
+      await pumpHost(
+        tester,
+        open: (context) => showImportDialog(context, transfer),
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('confirmImportButton')));
+      await tester.pump();
+      // The read is still open, so Cancel is offered and truthful.
+      expect(find.byKey(const ValueKey('cancelImportButton')), findsOneWidget);
+      expect(native.readTokens, ['md-12']);
+
+      await tester.tap(find.byKey(const ValueKey('cancelImportButton')));
+      await settle(tester);
+      expect(find.text('Import notes'), findsNothing);
+
+      native.readGate!.complete();
+      await settle(tester);
+      await io(
+        tester,
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+
+      expect(native.released, ['md-12'], reason: 'released exactly once');
+      expect(session.data!.notes, hasLength(1));
+      expect(native.commitCount, 0);
+      expect(transfer.pendingImport, isNull);
+    });
+
+    testWidgets('a barrier tap during a read cannot commit later', (
+      tester,
+    ) async {
+      native.nextPicked = const PickedImport(token: 'md-13', name: 'later.md');
+      native.importBytes = Uint8List.fromList(utf8.encode('later body'));
+      native.readGate = Completer<void>();
+
+      await pumpHost(
+        tester,
+        open: (context) => showImportDialog(context, transfer),
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('confirmImportButton')));
+      await tester.pump();
+
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.text('Import notes'), findsNothing);
+
+      native.readGate!.complete();
+      await settle(tester);
+      await io(
+        tester,
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+
+      expect(session.data!.notes, hasLength(1));
+      expect(native.commitCount, 0);
+      expect(native.released, ['md-13']);
+    });
   });
 
   group('app root', () {
@@ -455,6 +650,80 @@ void main() {
       expect(native.released, ['md-5']);
       expect(transfer.pendingImport, isNull);
       expect(session.data!.notes, hasLength(1));
+    });
+
+    testWidgets('a barrier-dismissed resume is not offered on a later unlock', (
+      tester,
+    ) async {
+      native.nextPicked = const PickedImport(token: 'md-14', name: 'bar.md');
+      native.importBytes = Uint8List.fromList(utf8.encode('bar body'));
+      await pumpApp(tester);
+      await io(tester, transfer.pickImport);
+      await io(tester, session.lock);
+      await settle(tester);
+
+      await io(tester, () => session.unlock(localPassword));
+      await settle(tester);
+      expect(find.text('Import notes'), findsOneWidget);
+
+      // Dismissing the resumed dialog is a cancel, not a pause.
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+      expect(native.released, ['md-14']);
+      expect(transfer.pendingImport, isNull);
+
+      await io(tester, session.lock);
+      await settle(tester);
+      await io(tester, () => session.unlock(localPassword));
+      await settle(tester);
+
+      expect(find.text('Import notes'), findsNothing);
+      expect(find.text('bar.md'), findsNothing);
+      expect(native.released, ['md-14'], reason: 'still released only once');
+      expect(session.data!.notes, hasLength(1));
+    });
+
+    testWidgets('a failed commit keeps the busy UI truthful', (tester) async {
+      native.nextPicked = const PickedImport(token: 'md-15', name: 'slow.md');
+      native.importBytes = Uint8List.fromList(utf8.encode('slow body'));
+      // Hold the vault commit open so the dialog is in its committing stage.
+      native.holdAt = CommitStage.fileSync;
+      await pumpApp(tester);
+      await tester.tap(find.byKey(const ValueKey('importNotesButton')));
+      await settle(tester);
+      expect(find.text('slow.md'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('confirmImportButton')));
+      await tester.pump();
+      // Pump while the seal runs; the commit then parks at the held stage.
+      for (var i = 0; i < 200 && !native.entered.isCompleted; i++) {
+        await io(
+          tester,
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(native.entered.isCompleted, isTrue);
+      await settle(tester);
+
+      expect(
+        find.byKey(const ValueKey('importSavingHint')),
+        findsOneWidget,
+        reason: 'the UI says the commit cannot be cancelled',
+      );
+      final cancel = tester.widget<TextButton>(
+        find.byKey(const ValueKey('cancelImportButton')),
+      );
+      expect(cancel.onPressed, isNull, reason: 'no impossible cancel offer');
+
+      native.release();
+      await settle(tester);
+      expect(find.text('Import notes'), findsNothing);
+      expect(
+        session.data!.notes.map((note) => note.markdown),
+        contains('slow body'),
+      );
+      expect(native.released, ['md-15']);
     });
 
     testWidgets('a picker that returns after the lock is offered on unlock', (

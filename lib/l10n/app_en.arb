@@ -105,5 +105,6 @@
   "importWrongPassword": "That export password is incorrect. Your notes were not changed.",
   "importLimit": "This file is too large to import. Your notes were not changed.",
   "importUnsupported": "This file is not a supported .encrynote or .md file. Your notes were not changed.",
-  "importMarkdownWarning": "A plain Markdown file is stored encrypted in EnCryNote, but the original .md file outside the app stays plaintext."
+  "importMarkdownWarning": "A plain Markdown file is stored encrypted in EnCryNote, but the original .md file outside the app stays plaintext.",
+  "importSavingHint": "Saving the imported notes. This last step cannot be cancelled."
 }

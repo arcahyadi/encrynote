@@ -289,4 +289,8 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get importMarkdownWarning =>
       'A plain Markdown file is stored encrypted in EnCryNote, but the original .md file outside the app stays plaintext.';
+
+  @override
+  String get importSavingHint =>
+      'Saving the imported notes. This last step cannot be cancelled.';
 }

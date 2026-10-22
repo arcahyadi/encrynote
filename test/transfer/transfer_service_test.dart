@@ -262,6 +262,75 @@ void main() {
       expect(native.released, ['first']);
       expect(transfer.pendingImport?.token, 'second');
     });
+
+    test('cancel is idempotent and releases a handle once', () async {
+      native.nextPicked = picked(token: 'once');
+      await transfer.pickImport();
+
+      await transfer.cancelImport();
+      await transfer.cancelImport();
+      // Dispose is the last path that could release the same handle again.
+      transfer.dispose();
+      // Recreate so tearDown's own dispose stays valid.
+      transfer = TransferService(
+        session: session,
+        crypto: crypto,
+        native: native,
+      );
+
+      expect(native.released, ['once']);
+    });
+
+    test(
+      'a cancel mid-read stops the batch before it reaches the session',
+      () async {
+        native.nextPicked = picked(token: 'slow', name: 'slow.md');
+        native.importBytes = Uint8List.fromList(utf8.encode('slow body'));
+        native.readGate = Completer<void>();
+        final handle = await transfer.pickImport();
+
+        final importing = transfer.importPicked(handle!);
+        // The read is parked, so the operation is still cancellable.
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(transfer.importStage, ImportStage.reading);
+        await transfer.cancelImport();
+        native.readGate!.complete();
+
+        await expectLater(importing, _rejectedAs(FailureCode.busy));
+        expect(session.data!.notes, hasLength(1));
+        expect(native.commitCount, 0);
+        expect(native.released, ['slow']);
+        expect(transfer.pendingImport, isNull);
+        expect(transfer.importStage, ImportStage.idle);
+      },
+    );
+
+    test('a cancel cannot interrupt the vault commit stage', () async {
+      native.nextPicked = picked(token: 'committing', name: 'c.md');
+      native.importBytes = Uint8List.fromList(utf8.encode('commit body'));
+      native.holdAt = CommitStage.fileSync;
+      final handle = await transfer.pickImport();
+
+      final importing = transfer.importPicked(handle!);
+      for (var i = 0; i < 200 && !native.entered.isCompleted; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(native.entered.isCompleted, isTrue);
+      expect(transfer.importStage, ImportStage.committing);
+
+      await transfer.cancelImport();
+      expect(native.released, isEmpty, reason: 'nothing cancelled mid-commit');
+
+      native.release();
+      await importing;
+
+      expect(
+        session.data!.notes.map((note) => note.markdown),
+        contains('commit body'),
+      );
+      expect(native.released, ['committing']);
+      expect(transfer.importStage, ImportStage.idle);
+    });
   });
 
   group('markdown import', () {
