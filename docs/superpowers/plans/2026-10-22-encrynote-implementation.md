@@ -39,7 +39,7 @@
 
 - [x] Task 1: Model vault dan kriptografi lokal yang dapat diuji.
 - [x] Task 2: Penyimpanan ciphertext dengan commit dan pemulihan yang jelas.
-- [ ] Task 3: Sesi, autosave, recovery, dan pengurutan perubahan.
+- [x] Task 3: Sesi, autosave, recovery, dan pengurutan perubahan.
 - [ ] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
 - [ ] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
 - [ ] Task 6: Daftar catatan dan editor Write/Preview yang benar-benar berfungsi.
@@ -124,7 +124,7 @@ expect(await store.read(), orderedEquals(created.envelope));
 
 **Interfaces:** `NoteSession({required VaultCrypto crypto, required VaultStore store})`. Enum `SessionPhase { loading, needsSetup, locked, recovering, unlocked, storageError }`; getters `phase`, `data` (`VaultData?`, null ketika locked/recovering), `recoveryQuestions` (`List<String>` tanpa jawaban), `canMutate`, `isBusy`, `failure` (`FailureCode?`). Methods `load()`, `setup(String password, RecoveryConfig recovery)`, `unlock(String password)`, `beginRecovery(List<String> answers)`, `completeRecovery(String newPassword)`, `saveNote(Note note)`, `deleteNote(String id)`, `setAutoLock(AutoLockMode mode)`, `retrySave()`, `lock()`, semuanya `Future<void>`. `saveNote` menerima dan memvalidasi draft sebelum await/debounce, dengan Future selesai setelah commit yang mencakup revisi itu; jangan meninggalkan satu-satunya salinan edit di controller widget. `beginRecovery` memverifikasi jawaban dan merekonsiliasi pending data, lalu menyimpan key hanya sebagai state recovery privat; tidak membuka catatan. `completeRecovery` baru mengaktifkan credential/sesi setelah commit. Membatalkan recovery memanggil `lock()`, yang menyembunyikan data sebelum await penyegelan. `readNotesForExport() -> List<Note>` mengembalikan salinan immutable hanya jika sesi boleh beroperasi; `appendImported(List<Note> notes) -> Future<void>` memberi ID lokal baru dan commit satu batch.
 
-- [ ] **Step 1:** Tulis test gagal untuk setup hanya selesai sesudah commit, lock membuang data dari state UI, recovery mengganti password tanpa mengubah isi, full-snapshot limit, dan snapshot pending otoritatif:
+- [x] **Step 1:** Tulis test gagal untuk setup hanya selesai sesudah commit, lock membuang data dari state UI, recovery mengganti password tanpa mengubah isi, full-snapshot limit, dan snapshot pending otoritatif:
 
 ```dart
 native.failNextCommit = true;
@@ -138,10 +138,10 @@ expect(session.data!.notes.single.markdown, editedNote.markdown);
 ```
 
   Tambahkan controlled-Future tests `late save cannot revive locked state`, `retry cannot restore old password after recovery`, `failed recovery commit keeps original credentials`, dan `lock flushes the last keystroke before the debounce fires`. Revisi/credential lama tidak boleh memenangkan commit yang lebih baru.
-- [ ] **Step 2:** Jalankan `flutter test test/session/note_session_test.dart` hingga kegagalan menunjuk perilaku yang belum tersedia.
-- [ ] **Step 3:** Implementasikan satu antrean perubahan dengan revisi dan epoch sesi. Debounce penyegelan/penulisan autosave 500 ms berada di sesi, bukan di widget; semua edit yang sudah diterima harus ikut flush saat lock/berpindah catatan. Snapshot gagal-simpan tetap ciphertext otoritatif; blokir semua mutasi/ekspor sampai rekonsiliasi. Recovery merekonsiliasi data dulu dan baru mengganti wrapper setelah commit berhasil. Jangan membuat antrean retry credential independen. Validasi snapshot penuh sebelum diterima; input yang ditolak harus ditandai dan editor dikembalikan ke nilai terakhir yang diterima, bukan dipotong diam-diam atau diklaim tersimpan.
-- [ ] **Step 4:** Jalankan semua test `flutter test test/vault test/session`; lulus termasuk credential baru diterima dan credential lama ditolak tanpa fallback ke backup.
-- [ ] **Step 5:** Commit: `feat: coordinate note sessions recovery and pending saves`.
+- [x] **Step 2:** Jalankan `flutter test test/session/note_session_test.dart` hingga kegagalan menunjuk perilaku yang belum tersedia.
+- [x] **Step 3:** Implementasikan satu antrean perubahan dengan revisi dan epoch sesi. Debounce penyegelan/penulisan autosave 500 ms berada di sesi, bukan di widget; semua edit yang sudah diterima harus ikut flush saat lock/berpindah catatan. Snapshot gagal-simpan tetap ciphertext otoritatif; blokir semua mutasi/ekspor sampai rekonsiliasi. Recovery merekonsiliasi data dulu dan baru mengganti wrapper setelah commit berhasil. Jangan membuat antrean retry credential independen. Validasi snapshot penuh sebelum diterima; input yang ditolak harus ditandai dan editor dikembalikan ke nilai terakhir yang diterima, bukan dipotong diam-diam atau diklaim tersimpan.
+- [x] **Step 4:** Jalankan semua test `flutter test test/vault test/session`; lulus termasuk credential baru diterima dan credential lama ditolak tanpa fallback ke backup.
+- [x] **Step 5:** Commit: `feat: coordinate note sessions recovery and pending saves`.
 
 ### Task 4: Setup, unlock, localization, dan nama aplikasi
 
