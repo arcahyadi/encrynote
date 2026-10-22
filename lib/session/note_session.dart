@@ -53,6 +53,7 @@ class NoteSession extends ChangeNotifier {
   int _sealedAt = 0;
   bool _failed = false;
   bool _uncertain = false;
+  bool _reload = false;
   int _epoch = 0;
   int _busy = 0;
   bool _disposed = false;
@@ -75,6 +76,10 @@ class NoteSession extends ChangeNotifier {
   List<String> get recoveryQuestions => _questions;
 
   bool get isBusy => _busy > 0;
+
+  /// A load failure means there is no open vault to retry writing, so the UI
+  /// must call [load] again; [retrySave] cannot recover from it.
+  bool get needsReload => _reload;
 
   /// A failed write freezes edits, import, export and credential changes until
   /// the sealed snapshot is reconciled with the disk. An in-flight commit does
@@ -105,11 +110,13 @@ class NoteSession extends ChangeNotifier {
         _recoveryData = null;
         _failure = null;
         _failed = false;
+        _reload = false;
         _notify();
       });
     } on VaultException catch (error) {
       _failure = error.code;
       _phase = SessionPhase.storageError;
+      _reload = true;
       _notify();
       rethrow;
     } finally {
@@ -336,6 +343,11 @@ class NoteSession extends ChangeNotifier {
     if (_phase == SessionPhase.recovering) {
       throw const VaultException(FailureCode.busy, 'phase');
     }
+    // A load failure left no open vault; silently returning would look like a
+    // successful retry, so callers must load again instead.
+    if (_reload) {
+      throw const VaultException(FailureCode.storage, 'load');
+    }
     if (_pending == null && !_failed) return;
     _begin();
     try {
@@ -365,6 +377,9 @@ class NoteSession extends ChangeNotifier {
   /// `needsSetup`/`locked` and the recovery questions.
   Future<void> lock() {
     if (_phase == SessionPhase.loading) return Future<void>.value();
+    // A failed load has no key and no notes to hide; locking would hide the
+    // only way to retry the load.
+    if (_reload) return Future<void>.value();
     if (_phase == SessionPhase.needsSetup) {
       if (_busy == 0) return Future<void>.value();
       _epoch++;
@@ -622,6 +637,7 @@ class NoteSession extends ChangeNotifier {
       _sealedAt = 0;
       _failed = false;
       _uncertain = false;
+      _reload = false;
       _phase = SessionPhase.locked;
       _notify();
       return;
@@ -639,6 +655,7 @@ class NoteSession extends ChangeNotifier {
     _sealedAt = 0;
     _failed = false;
     _uncertain = false;
+    _reload = false;
     _failure = null;
     _phase = SessionPhase.unlocked;
     _notify();

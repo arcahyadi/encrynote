@@ -1,30 +1,54 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hello_flutter/app.dart';
+import 'package:hello_flutter/session/note_session.dart';
+import 'package:hello_flutter/vault/vault_crypto.dart';
+import 'package:hello_flutter/vault/vault_store.dart';
 
-import 'package:hello_flutter/main.dart';
+import 'support/fake_native_bridge.dart';
 
+/// Smoke test: the app boots into the English EnCryNote setup flow.
+///
+/// Detailed setup/unlock/recovery coverage lives in
+/// `test/auth/auth_screen_test.dart`.
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  late Directory scratchRoot;
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  setUpAll(() async {
+    scratchRoot = await Directory(
+      '${Directory.current.path}/.dart_tool/test_scratch/widget_smoke/'
+      '${DateTime.now().microsecondsSinceEpoch}',
+    ).create(recursive: true);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  tearDownAll(() async {
+    if (await scratchRoot.exists()) await scratchRoot.delete(recursive: true);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('the app boots into the English setup flow', (tester) async {
+    final dir = (await tester.runAsync(
+      () => Directory('${scratchRoot.path}/1').create(recursive: true),
+    ))!;
+    final session = NoteSession(
+      crypto: VaultCrypto(),
+      store: VaultStore(directory: dir, native: FakeNativeBridge()),
+    );
+    addTearDown(session.dispose);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(800, 1200);
+    addTearDown(tester.view.reset);
+
+    await tester.runAsync(session.load);
+    await tester.pumpWidget(EnCryNoteApp(session: session));
+    await tester.pumpAndSettle();
+
+    expect(find.text('EnCryNote'), findsOneWidget);
+    expect(find.text('Create your password'), findsOneWidget);
+    expect(find.text('Recovery question 1'), findsOneWidget);
+    expect(find.text('Recovery question 3'), findsOneWidget);
+    expect(find.text('Recovery question 4'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 }

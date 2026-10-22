@@ -1,0 +1,60 @@
+{
+  "@@locale": "en",
+  "appTitle": "EnCryNote",
+  "loadingTitle": "Opening your vault...",
+  "createPasswordTitle": "Create your password",
+  "passwordLabel": "Password",
+  "confirmPasswordLabel": "Confirm password",
+  "recoverySectionTitle": "Recovery questions",
+  "recoveryQuestionLabel": "Recovery question {index}",
+  "@recoveryQuestionLabel": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "recoveryAnswerLabel": "Answer {index}",
+  "@recoveryAnswerLabel": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "setupHint": "Your recovery questions are stored unencrypted in the vault file and can be read while it is locked, so do not put secrets in them. Answers are case-sensitive after trimming outer spaces. Recovery cannot open .encrynote export files.",
+  "createVaultButton": "Create vault",
+  "unlockTitle": "Unlock EnCryNote",
+  "unlockButton": "Unlock",
+  "forgotPasswordButton": "Forgot password?",
+  "passwordTooShort": "Use at least 8 characters.",
+  "passwordMismatch": "The passwords do not match.",
+  "questionRequired": "Enter a question.",
+  "answerRequired": "Enter an answer.",
+  "wrongPassword": "That password is incorrect.",
+  "setupSaveFailed": "EnCryNote could not save the new vault. Nothing was changed; try again.",
+  "unlockFailed": "The vault could not be unlocked. Try again.",
+  "recoveryTitle": "Recover your vault",
+  "recoveryHint": "Answers are case-sensitive after trimming outer spaces. Recovery cannot open .encrynote export files.",
+  "recoverButton": "Recover vault",
+  "recoveryFailed": "One or more answers are incorrect.",
+  "newPasswordTitle": "Create a new password",
+  "newPasswordLabel": "New password",
+  "confirmNewPasswordLabel": "Confirm new password",
+  "setPasswordButton": "Save new password",
+  "recoverySaveFailed": "EnCryNote could not save the new password. Nothing was changed; try again.",
+  "cancelRecoveryButton": "Cancel",
+  "storageErrorTitle": "Your vault could not be opened",
+  "storageCorrupt": "The vault file is damaged or is not an EnCryNote vault.",
+  "storageUnsupported": "This vault was written by a newer or different version of EnCryNote.",
+  "storageLimit": "The vault file is too large to open.",
+  "storageRead": "The vault file could not be read. Check the disk and try again.",
+  "storageBusy": "The vault is still in use. Try again in a moment.",
+  "retryButton": "Retry",
+  "saveErrorTitle": "Your last change is not saved yet",
+  "saveErrorBody": "EnCryNote is keeping the change and will not accept new edits until it is saved. Retry the save now.",
+  "retryFailed": "That did not work. Nothing was changed; try again.",
+  "unlockedTitle": "Your vault is unlocked",
+  "unlockedBody": "Your notes will appear here.",
+  "lockNowButton": "Lock now"
+}

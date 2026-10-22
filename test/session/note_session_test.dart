@@ -101,6 +101,74 @@ void main() {
     expect(session.canMutate, isFalse);
   });
 
+  test('a failed load can be retried by loading again', () async {
+    await File('${dir.path}/vault.enc').writeAsString('not a vault');
+    await expectLater(session.load(), throwsA(isA<VaultException>()));
+    expect(session.phase, SessionPhase.storageError);
+    expect(
+      session.needsReload,
+      isTrue,
+      reason: 'a load failure must ask for a reload, not a save retry',
+    );
+    expect(session.data, isNull);
+
+    await File('${dir.path}/vault.enc').writeAsBytes(seed, flush: true);
+    await session.load();
+
+    expect(session.needsReload, isFalse);
+    expect(session.phase, SessionPhase.locked);
+    expect(session.recoveryQuestions, fixtureRecovery.questions);
+  });
+
+  test('retrySave refuses a load failure instead of doing nothing', () async {
+    await File('${dir.path}/vault.enc').writeAsString('not a vault');
+    await expectLater(session.load(), throwsA(isA<VaultException>()));
+
+    await expectLater(
+      session.retrySave(),
+      _rejectedAs(FailureCode.storage),
+      reason: 'a no-op retry would look like a successful recovery',
+    );
+    expect(session.phase, SessionPhase.storageError);
+    expect(session.needsReload, isTrue);
+  });
+
+  test('lock keeps a load failure on its retry screen', () async {
+    await File('${dir.path}/vault.enc').writeAsString('not a vault');
+    await expectLater(session.load(), throwsA(isA<VaultException>()));
+
+    await session.lock();
+
+    expect(
+      session.phase,
+      SessionPhase.storageError,
+      reason: 'locking would hide the only way to retry the load',
+    );
+    expect(session.needsReload, isTrue);
+  });
+
+  test('a failed save asks for a save retry, not a reload', () async {
+    await unlockSeeded();
+    native.failNextCommit = true;
+    await expectLater(
+      session.saveNote(editedNote('edited body')),
+      throwsA(isA<VaultException>()),
+    );
+
+    expect(session.phase, SessionPhase.storageError);
+    expect(session.needsReload, isFalse);
+    expect(session.data, isNotNull, reason: 'frozen data stays readable');
+    expect(
+      session.canMutate,
+      isFalse,
+      reason: 'readable frozen data is not permission to edit',
+    );
+
+    await session.retrySave();
+    expect(session.phase, SessionPhase.unlocked);
+    expect(session.data!.notes.single.markdown, 'edited body');
+  });
+
   test('setup is only complete after the commit point', () async {
     await session.load();
     native.holdAt = CommitStage.fileSync;
