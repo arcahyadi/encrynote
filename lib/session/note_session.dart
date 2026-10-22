@@ -43,6 +43,7 @@ class NoteSession extends ChangeNotifier {
   UnlockedVault? _recovery;
   VaultData? _recoveryData;
   List<String> _questions = const [];
+  AutoLockMode _autoLock = AutoLockMode.oneMinute;
 
   Uint8List? _pending;
   VaultData? _pendingData;
@@ -55,6 +56,7 @@ class NoteSession extends ChangeNotifier {
   bool _uncertain = false;
   int _epoch = 0;
   int _busy = 0;
+  int _lockGeneration = 0;
   bool _disposed = false;
 
   Timer? _debounce;
@@ -73,6 +75,14 @@ class NoteSession extends ChangeNotifier {
   };
 
   List<String> get recoveryQuestions => _questions;
+
+  /// The saved auto-lock preference, readable while locked or recovering so the
+  /// lifecycle can keep enforcing it without note contents.
+  AutoLockMode get autoLock => _autoLock;
+
+  /// Increments every time a real lock hides the session. The privacy lifecycle
+  /// uses it to tell a lock it still owes a fresh frame from one already shown.
+  int get lockGeneration => _lockGeneration;
 
   bool get isBusy => _busy > 0;
 
@@ -137,6 +147,7 @@ class NoteSession extends ChangeNotifier {
         _revision = 0;
         _failure = null;
         _failed = false;
+        _autoLock = AutoLockMode.oneMinute;
         _notify();
       });
     } on VaultException catch (error) {
@@ -255,6 +266,7 @@ class NoteSession extends ChangeNotifier {
         if (epoch != _epoch) return;
         _recovery = opened;
         _recoveryData = opened.data;
+        _autoLock = opened.data.autoLock;
         _data = null;
         _vault = null;
         _phase = SessionPhase.recovering;
@@ -412,6 +424,7 @@ class NoteSession extends ChangeNotifier {
       if (_busy == 0) return Future<void>.value();
       _epoch++;
       _phase = SessionPhase.locked;
+      _lockGeneration++;
       _debounce?.cancel();
       _debounce = null;
       _notify();
@@ -419,6 +432,7 @@ class NoteSession extends ChangeNotifier {
     }
     _epoch++;
     _phase = SessionPhase.locked;
+    _lockGeneration++;
     _failure = null;
     _debounce?.cancel();
     _debounce = null;
@@ -495,6 +509,7 @@ class NoteSession extends ChangeNotifier {
     // accepted value in place and never reaches the writer.
     _crypto.checkSnapshotFits(vault, next, revision);
     _data = next;
+    _autoLock = next.autoLock;
     _accepted++;
     final waiter = _Waiter(_accepted);
     _waiters.add(waiter);
@@ -678,6 +693,7 @@ class NoteSession extends ChangeNotifier {
     _vault = vault;
     _revision = vault.revision;
     _data = vault.data;
+    _autoLock = vault.data.autoLock;
     _questions = _crypto.readRecoveryQuestions(vault.envelope);
     _recovery = null;
     _recoveryData = null;

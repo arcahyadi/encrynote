@@ -1,4 +1,4 @@
-import Foundation
+import Cocoa
 import FlutterMacOS
 
 /// Replaces the vault on disk with an explicit commit point.
@@ -12,25 +12,103 @@ import FlutterMacOS
 /// a caller that reports "not saved" tells the truth. If that rollback itself
 /// fails, the active generation is genuinely unknown and the call reports
 /// `commit.uncertain` rather than claiming either outcome.
-final class EnCryNoteBridge: NSObject, FlutterPlugin {
+///
+/// It also owns the privacy shield and the window-focus stream. The shield is
+/// installed when the app or its window loses key status, before AppKit can
+/// snapshot the window; only Flutter removes it, after its deadline and frame
+/// checks.
+final class EnCryNoteBridge: NSObject, FlutterPlugin, FlutterStreamHandler {
   private static let channelName = "encrynote/platform"
+  private static let focusChannelName = "encrynote/focus"
   private static let stagedName = "vault.next"
   private static let activeName = "vault.enc"
   private static let previousName = "vault.previous"
 
   private let queue = DispatchQueue(label: "encrynote.commit")
+  private weak var registrarView: NSView?
+  private var shield: NSView?
+  private var focusSink: FlutterEventSink?
+
+  /// Test seam: whether the opaque cover is currently installed.
+  var isShieldInstalled: Bool { shield != nil }
+
+  /// Test seam: supplies the view the cover is installed over.
+  func attachHostView(_ view: NSView) {
+    registrarView = view
+  }
 
   static func register(with registrar: FlutterPluginRegistrar) {
+    let bridge = EnCryNoteBridge()
+    bridge.registrarView = registrar.view
     let channel = FlutterMethodChannel(
       name: channelName, binaryMessenger: registrar.messenger)
-    registrar.addMethodCallDelegate(EnCryNoteBridge(), channel: channel)
+    registrar.addMethodCallDelegate(bridge, channel: channel)
+    let focus = FlutterEventChannel(
+      name: focusChannelName, binaryMessenger: registrar.messenger)
+    focus.setStreamHandler(bridge)
+    bridge.observeFocus()
+  }
+
+  /// AppKit tells us before the window is hidden or the app is deactivated, so
+  /// the cover is already in place when the system takes its snapshot.
+  ///
+  /// Window notifications are filtered to this app's own window: an OS open or
+  /// save panel becomes key while the app is still in front, and that must not
+  /// count as the app regaining focus.
+  func observeFocus() {
+    let center = NotificationCenter.default
+    let window = registrarView?.window
+    center.addObserver(
+      self, selector: #selector(willLoseFocus),
+      name: NSApplication.didResignActiveNotification, object: nil)
+    center.addObserver(
+      self, selector: #selector(willLoseFocus),
+      name: NSWindow.didResignKeyNotification, object: window)
+    center.addObserver(
+      self, selector: #selector(willLoseFocus),
+      name: NSWindow.didMiniaturizeNotification, object: window)
+    center.addObserver(
+      self, selector: #selector(didGainFocus),
+      name: NSApplication.didBecomeActiveNotification, object: nil)
+    center.addObserver(
+      self, selector: #selector(didGainFocus),
+      name: NSWindow.didBecomeKeyNotification, object: window)
+  }
+
+  @objc private func willLoseFocus() {
+    installShield()
+    focusSink?(false)
+  }
+
+  @objc private func didGainFocus() {
+    focusSink?(true)
+  }
+
+  func onListen(
+    withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink
+  ) -> FlutterError? {
+    focusSink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    focusSink = nil
+    return nil
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard call.method == "commitVault" else {
+    switch call.method {
+    case "setPrivacyShield":
+      if call.arguments as? Bool == true { installShield() } else { removeShield() }
+      result(nil)
+    case "commitVault":
+      commitCall(call, result: result)
+    default:
       result(FlutterMethodNotImplemented)
-      return
     }
+  }
+
+  private func commitCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     let arguments = call.arguments as? [String: Any]
     guard let stagedPath = arguments?["stagedPath"] as? String,
       let activePath = arguments?["activePath"] as? String,
@@ -59,6 +137,23 @@ final class EnCryNoteBridge: NSObject, FlutterPlugin {
     }
   }
 
+  /// Opaque and covering, so no stale note frame reaches the app switcher.
+  private func installShield() {
+    let host = registrarView ?? NSApplication.shared.mainWindow?.contentView
+    guard shield == nil, let host = host else { return }
+    let cover = NSView(frame: host.bounds)
+    cover.autoresizingMask = [.width, .height]
+    cover.wantsLayer = true
+    cover.layer?.backgroundColor = NSColor.black.cgColor
+    host.addSubview(cover, positioned: .above, relativeTo: nil)
+    shield = cover
+  }
+
+  private func removeShield() {
+    shield?.removeFromSuperview()
+    shield = nil
+  }
+
   private struct CommitFailure: Error {
     let reason: String
   }
@@ -82,8 +177,8 @@ final class EnCryNoteBridge: NSObject, FlutterPlugin {
     let previousURL = try checkedURL(
       previous, root: root, expectedName: Self.previousName)
 
-    // All three must share one parent; the vault is one directory, not a set of
-    // files that may be split across directories.
+    // All three must share one parent; the vault is one directory, not a set
+    // of files that may be split across directories.
     let parent = activeURL.deletingLastPathComponent()
     guard stagedURL.deletingLastPathComponent().path == parent.path,
       previousURL.deletingLastPathComponent().path == parent.path

@@ -28,6 +28,40 @@ class FakeNativeBridge implements NativeBridge {
   /// Fails the next commit at [stage]; the failing stage does not take effect.
   CommitStage? failAt;
 
+  final StreamController<bool> _focus = StreamController<bool>.broadcast();
+
+  /// Every native call in order, so a test can prove the shield was up before
+  /// a frame could expose notes.
+  final List<String> events = [];
+
+  /// Mirrors the native state: no cover is installed at startup.
+  bool shieldVisible = false;
+
+  /// Counts every shield request, including the no-op repeats the native
+  /// implementations skip, so a test can prove a call was made.
+  int shieldCalls = 0;
+
+  /// Delivers a focus change to the app as the native side would.
+  void emitFocus(bool focused) => _focus.add(focused);
+
+  /// Models the native shield installation failing.
+  bool failShield = false;
+
+  @override
+  Stream<bool> get focusChanges => _focus.stream;
+
+  /// Mirrors the native idempotence: repeating the current state is a no-op.
+  @override
+  Future<void> setPrivacyShield(bool visible) async {
+    shieldCalls++;
+    if (failShield) {
+      throw const VaultException(FailureCode.storage, 'shield.failed');
+    }
+    if (shieldVisible == visible) return;
+    shieldVisible = visible;
+    events.add('shield:$visible');
+  }
+
   /// Shorthand for `failAt = CommitStage.backup`, used by the brief's snippet.
   bool failNextCommit = false;
 

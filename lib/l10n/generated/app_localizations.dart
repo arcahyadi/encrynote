@@ -351,6 +351,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Lock now'**
   String get lockNowButton;
+
+  /// No description provided for @settingsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get settingsTitle;
+
+  /// No description provided for @settingsButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get settingsButton;
+
+  /// No description provided for @autoLockTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-lock'**
+  String get autoLockTitle;
+
+  /// No description provided for @autoLockImmediately.
+  ///
+  /// In en, this message translates to:
+  /// **'Immediately'**
+  String get autoLockImmediately;
+
+  /// No description provided for @autoLockOneMinute.
+  ///
+  /// In en, this message translates to:
+  /// **'1 minute'**
+  String get autoLockOneMinute;
+
+  /// No description provided for @autoLockFiveMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'5 minutes'**
+  String get autoLockFiveMinutes;
+
+  /// No description provided for @autoLockTenMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'10 minutes'**
+  String get autoLockTenMinutes;
+
+  /// No description provided for @settingsLockedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Your vault is locked. Unlock to change this.'**
+  String get settingsLockedHint;
+
+  /// No description provided for @settingsFrozenHint.
+  ///
+  /// In en, this message translates to:
+  /// **'A change is not saved yet, so auto-lock cannot change until the save succeeds.'**
+  String get settingsFrozenHint;
+
+  /// No description provided for @settingsSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'EnCryNote could not save that setting. Nothing was changed; try again.'**
+  String get settingsSaveFailed;
 }
 
 class _AppLocalizationsDelegate

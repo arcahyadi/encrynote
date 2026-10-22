@@ -520,6 +520,35 @@ void main() {
     expect(onDisk.data.autoLock, AutoLockMode.tenMinutes);
   });
 
+  test('the saved auto-lock policy survives lock and recovery', () async {
+    await unlockSeeded();
+    await session.setAutoLock(AutoLockMode.immediately);
+    await session.lock();
+    expect(
+      session.autoLock,
+      AutoLockMode.immediately,
+      reason: 'the lifecycle needs the policy while notes stay hidden',
+    );
+
+    await session.beginRecovery(fixtureRecovery.answers);
+    expect(session.phase, SessionPhase.recovering);
+    expect(session.autoLock, AutoLockMode.immediately);
+
+    await session.lock();
+    expect(session.autoLock, AutoLockMode.immediately);
+    expect(session.data, isNull);
+  });
+
+  test('a lock without an open session still counts as a generation', () async {
+    await seedVault();
+    await session.load();
+    final before = session.lockGeneration;
+
+    await session.lock();
+    expect(session.phase, SessionPhase.locked);
+    expect(session.lockGeneration, before + 1);
+  });
+
   test('export copies notes only while the session may operate', () async {
     await unlockSeeded();
     final notes = session.readNotesForExport();

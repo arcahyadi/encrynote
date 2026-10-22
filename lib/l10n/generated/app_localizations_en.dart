@@ -150,4 +150,37 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get lockNowButton => 'Lock now';
+
+  @override
+  String get settingsTitle => 'Settings';
+
+  @override
+  String get settingsButton => 'Settings';
+
+  @override
+  String get autoLockTitle => 'Auto-lock';
+
+  @override
+  String get autoLockImmediately => 'Immediately';
+
+  @override
+  String get autoLockOneMinute => '1 minute';
+
+  @override
+  String get autoLockFiveMinutes => '5 minutes';
+
+  @override
+  String get autoLockTenMinutes => '10 minutes';
+
+  @override
+  String get settingsLockedHint =>
+      'Your vault is locked. Unlock to change this.';
+
+  @override
+  String get settingsFrozenHint =>
+      'A change is not saved yet, so auto-lock cannot change until the save succeeds.';
+
+  @override
+  String get settingsSaveFailed =>
+      'EnCryNote could not save that setting. Nothing was changed; try again.';
 }

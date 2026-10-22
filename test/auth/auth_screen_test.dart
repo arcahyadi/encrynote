@@ -361,6 +361,69 @@ void main() {
     expect(session.phase, SessionPhase.unlocked);
   });
 
+  testWidgets('a same-phase lock drops typed recovery answers', (tester) async {
+    useTallViewport(tester);
+    await seedVault(tester);
+    await load(tester);
+    await pumpApp(tester);
+
+    await tapKey(tester, 'forgotPasswordButton');
+    await enter(tester, 'recoveryAnswer1', fixtureRecovery.answers.first);
+    await enter(tester, 'recoveryAnswer2', 'typed answer');
+    await enter(tester, 'recoveryAnswer3', 'another answer');
+
+    // An Immediately blur locks while the phase is already `locked`; the
+    // local form must not keep the answers the user typed.
+    await act(tester, () => session.lock(), done: () => !session.isBusy);
+    await tester.pumpAndSettle();
+
+    expect(session.phase, SessionPhase.locked);
+    expect(find.text('Recover your vault'), findsNothing);
+    expect(find.text('Unlock EnCryNote'), findsOneWidget);
+
+    await tapKey(tester, 'forgotPasswordButton');
+    for (var i = 0; i < 3; i++) {
+      final field = tester.widget<TextFormField>(
+        find.byKey(ValueKey('recoveryAnswer${i + 1}')),
+      );
+      expect(field.controller!.text, isEmpty);
+    }
+  });
+
+  testWidgets('a same-phase lock drops a typed unlock password', (
+    tester,
+  ) async {
+    useTallViewport(tester);
+    await seedVault(tester);
+    await load(tester);
+    await pumpApp(tester);
+
+    await enter(tester, 'unlockPasswordInput', localPassword);
+    await act(tester, () => session.lock(), done: () => !session.isBusy);
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextFormField>(
+      find.byKey(const ValueKey('unlockPasswordInput')),
+    );
+    expect(field.controller!.text, isEmpty);
+    expect(session.phase, SessionPhase.locked);
+  });
+
+  testWidgets('an unlocked session can open Settings', (tester) async {
+    useTallViewport(tester);
+    await seedVault(tester);
+    await load(tester);
+    await pumpApp(tester);
+    await unlockWith(tester, localPassword);
+
+    await tester.tap(find.byKey(const ValueKey('settingsButton')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Auto-lock'), findsOneWidget);
+    expect(find.text('1 minute'), findsOneWidget);
+    expect(find.text('Never'), findsNothing);
+  });
+
   testWidgets('the keyboard submit unlocks and creates the vault', (
     tester,
   ) async {

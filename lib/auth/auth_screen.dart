@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/generated/app_localizations.dart';
 import '../session/note_session.dart';
+import '../settings/settings_screen.dart';
 import '../vault/vault_types.dart';
 
 /// Setup, unlock and recovery, driven entirely by [NoteSession.phase].
@@ -28,11 +29,13 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _showingRecovery = false;
   String? _error;
   SessionPhase? _phase;
+  int _lockGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     _phase = widget.session.phase;
+    _lockGeneration = widget.session.lockGeneration;
     widget.session.addListener(_dropStaleFields);
   }
 
@@ -43,6 +46,7 @@ class _AuthScreenState extends State<AuthScreen> {
       oldWidget.session.removeListener(_dropStaleFields);
       widget.session.addListener(_dropStaleFields);
       _phase = widget.session.phase;
+      _lockGeneration = widget.session.lockGeneration;
       _dropAllFields();
     }
   }
@@ -55,6 +59,17 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _dropStaleFields() {
+    // A real lock must drop typed secrets even when the phase stays locked, so
+    // an Immediately blur cannot leave recovery answers in the rebuilt form.
+    final generation = widget.session.lockGeneration;
+    if (generation != _lockGeneration) {
+      _lockGeneration = generation;
+      _error = null;
+      _dropSetup();
+      _dropUnlock();
+      _dropRecovery();
+      _dropNewPassword();
+    }
     // A message from one phase must never leak into the next form.
     if (widget.session.phase != _phase) {
       _phase = widget.session.phase;
@@ -562,6 +577,12 @@ class _AuthScreenState extends State<AuthScreen> {
           key: const ValueKey('lockNowButton'),
           label: l10n.lockNowButton,
           onPressed: () => widget.session.lock(),
+        ),
+        TextButton(
+          key: const ValueKey('settingsButton'),
+          onPressed: () =>
+              Navigator.of(context).pushNamed(SettingsScreen.routeName),
+          child: Text(l10n.settingsButton),
         ),
       ],
     );

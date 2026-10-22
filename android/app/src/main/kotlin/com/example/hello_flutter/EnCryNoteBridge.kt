@@ -1,11 +1,15 @@
 package com.example.hello_flutter
 
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.system.Os
 import android.system.OsConstants
+import android.view.WindowManager
+import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -24,18 +28,28 @@ import java.util.concurrent.Executors
  * a caller that reports "not saved" tells the truth. If that rollback itself
  * fails, the active generation is genuinely unknown and the call reports
  * `commit.uncertain` rather than claiming either outcome.
+ *
+ * It also owns the privacy shield and the window-focus stream. The shield is
+ * installed from the activity callbacks before the system can snapshot the
+ * window; only Flutter removes it, after its own deadline and frame checks.
  */
-class EnCryNoteBridge(private val context: Context) : MethodChannel.MethodCallHandler {
+class EnCryNoteBridge private constructor(
+    private val activity: FlutterActivity,
+    private val context: Context,
+) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
         private const val CHANNEL = "encrynote/platform"
+        private const val FOCUS_CHANNEL = "encrynote/focus"
         private const val STAGED = "vault.next"
         private const val ACTIVE = "vault.enc"
         private const val PREVIOUS = "vault.previous"
 
-        fun register(messenger: BinaryMessenger, context: Context) {
-            val channel = MethodChannel(messenger, CHANNEL)
-            channel.setMethodCallHandler(EnCryNoteBridge(context.applicationContext))
+        fun register(messenger: BinaryMessenger, activity: FlutterActivity): EnCryNoteBridge {
+            val bridge = EnCryNoteBridge(activity, activity.applicationContext)
+            MethodChannel(messenger, CHANNEL).setMethodCallHandler(bridge)
+            EventChannel(messenger, FOCUS_CHANNEL).setStreamHandler(bridge)
+            return bridge
         }
     }
 
@@ -44,12 +58,67 @@ class EnCryNoteBridge(private val context: Context) : MethodChannel.MethodCallHa
         Thread(runnable, "encrynote-commit")
     }
     private val main = Handler(Looper.getMainLooper())
+    private var shieldVisible = false
+    private var focusSink: EventChannel.EventSink? = null
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if (call.method != "commitVault") {
-            result.notImplemented()
-            return
+        when (call.method) {
+            "setPrivacyShield" -> {
+                if (call.arguments == true) installShield() else removeShield()
+                result.success(null)
+            }
+            "commitVault" -> commitFrom(call, result)
+            else -> result.notImplemented()
         }
+    }
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+        focusSink = events
+    }
+
+    override fun onCancel(arguments: Any?) {
+        focusSink = null
+    }
+
+    /** Called on the platform thread before the window is paused or blurred. */
+    fun onWindowFocusChanged(focused: Boolean) {
+        if (!focused) installShield()
+        focusSink?.success(focused)
+    }
+
+    fun onPause() = installShield()
+
+    fun onResume() = focusSink?.success(true)
+
+    /**
+     * Opaque at the window level, so no stale note frame reaches the app
+     * switcher.
+     *
+     * A Flutter view is a SurfaceView, so a plain view added on top would not
+     * cover it: the surface is composited separately and punches through. The
+     * window flag makes the system snapshot and any capture opaque instead, and
+     * on Android 13+ the recents screenshot is disabled as well. Both are only
+     * active while shielded, so a screenshot of the open app still works.
+     */
+    private fun installShield() {
+        if (shieldVisible) return
+        shieldVisible = true
+        activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activity.setRecentsScreenshotEnabled(false)
+        }
+    }
+
+    private fun removeShield() {
+        if (!shieldVisible) return
+        shieldVisible = false
+        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activity.setRecentsScreenshotEnabled(true)
+        }
+    }
+
+    private fun commitFrom(call: MethodCall, result: MethodChannel.Result) {
         val stagedPath = call.argument<String>("stagedPath")
         val activePath = call.argument<String>("activePath")
         val previousPath = call.argument<String>("previousPath")

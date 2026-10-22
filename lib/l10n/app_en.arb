@@ -56,5 +56,15 @@
   "retryFailed": "That did not work. Nothing was changed; try again.",
   "unlockedTitle": "Your vault is unlocked",
   "unlockedBody": "Your notes will appear here.",
-  "lockNowButton": "Lock now"
+  "lockNowButton": "Lock now",
+  "settingsTitle": "Settings",
+  "settingsButton": "Settings",
+  "autoLockTitle": "Auto-lock",
+  "autoLockImmediately": "Immediately",
+  "autoLockOneMinute": "1 minute",
+  "autoLockFiveMinutes": "5 minutes",
+  "autoLockTenMinutes": "10 minutes",
+  "settingsLockedHint": "Your vault is locked. Unlock to change this.",
+  "settingsFrozenHint": "A change is not saved yet, so auto-lock cannot change until the save succeeds.",
+  "settingsSaveFailed": "EnCryNote could not save that setting. Nothing was changed; try again."
 }
