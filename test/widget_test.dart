@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hello_flutter/app.dart';
 import 'package:hello_flutter/session/note_session.dart';
+import 'package:hello_flutter/transfer/transfer_service.dart';
 import 'package:hello_flutter/vault/vault_crypto.dart';
 import 'package:hello_flutter/vault/vault_store.dart';
 
@@ -31,17 +32,25 @@ void main() {
     final dir = (await tester.runAsync(
       () => Directory('${scratchRoot.path}/1').create(recursive: true),
     ))!;
+    final native = FakeNativeBridge();
+    final crypto = VaultCrypto();
     final session = NoteSession(
-      crypto: VaultCrypto(),
-      store: VaultStore(directory: dir, native: FakeNativeBridge()),
+      crypto: crypto,
+      store: VaultStore(directory: dir, native: native),
+    );
+    final transfer = TransferService(
+      session: session,
+      crypto: crypto,
+      native: native,
     );
     addTearDown(session.dispose);
+    addTearDown(transfer.dispose);
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = const Size(800, 1200);
     addTearDown(tester.view.reset);
 
     await tester.runAsync(session.load);
-    await tester.pumpWidget(EnCryNoteApp(session: session));
+    await tester.pumpWidget(EnCryNoteApp(session: session, transfer: transfer));
     await tester.pumpAndSettle();
 
     expect(find.text('EnCryNote'), findsOneWidget);

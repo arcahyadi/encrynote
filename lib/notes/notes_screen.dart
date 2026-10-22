@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../session/note_session.dart';
 import '../settings/settings_screen.dart';
+import '../transfer/transfer_dialogs.dart';
+import '../transfer/transfer_service.dart';
 import '../vault/vault_types.dart';
 import 'note_editor.dart';
 
-/// The unlocked notes surface: list, CRUD and the Write/Preview editor.
+/// The unlocked notes surface: list, CRUD, transfer and the Write/Preview
+/// editor.
 ///
 /// Wide windows keep the list beside the editor; narrow ones swap between them
 /// inside this widget, so a lock replaces the whole surface instead of leaving
@@ -16,11 +19,12 @@ import 'note_editor.dart';
 /// mutation is checked against [NoteSession.canMutate] at the moment it is
 /// confirmed, and no note content is copied outside the session.
 class NotesScreen extends StatefulWidget {
-  const NotesScreen({super.key, required this.session});
+  const NotesScreen({super.key, required this.session, required this.transfer});
 
   static const double sideBySideBreakpoint = 720;
 
   final NoteSession session;
+  final TransferService transfer;
 
   @override
   State<NotesScreen> createState() => _NotesScreenState();
@@ -139,6 +143,18 @@ class _NotesScreenState extends State<NotesScreen> {
     await Navigator.of(context).pushNamed(SettingsScreen.routeName);
   }
 
+  Future<void> _openExport() async {
+    if (!_session.canMutate) return;
+    _flushEditor();
+    await showExportDialog(context, widget.transfer);
+  }
+
+  Future<void> _openImport() async {
+    if (!_session.canMutate) return;
+    _flushEditor();
+    await showImportDialog(context, widget.transfer);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -158,6 +174,18 @@ class _NotesScreenState extends State<NotesScreen> {
             : null,
         title: Text(l10n.notesTitle),
         actions: [
+          IconButton(
+            key: const ValueKey('exportNotesButton'),
+            icon: const Icon(Icons.ios_share),
+            tooltip: l10n.exportNotesButton,
+            onPressed: _session.canMutate ? _openExport : null,
+          ),
+          IconButton(
+            key: const ValueKey('importNotesButton'),
+            icon: const Icon(Icons.file_download_outlined),
+            tooltip: l10n.importNotesButton,
+            onPressed: _session.canMutate ? _openImport : null,
+          ),
           if (selected != null)
             IconButton(
               key: const ValueKey('deleteNoteButton'),

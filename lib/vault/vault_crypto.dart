@@ -9,6 +9,7 @@ import 'vault_types.dart';
 
 const int maxPayloadBytes = 8 * 1024 * 1024;
 const int maxEnvelopeBytes = 16 * 1024 * 1024;
+const int maxMarkdownBytes = 1024 * 1024;
 
 const String _suite = 'argon2id-aes256gcm';
 const int _version = 1;
@@ -24,6 +25,7 @@ const int _dataKeyLength = 32;
 const String _domainPayload = 'encrynote/local-payload';
 const String _domainPasswordWrap = 'encrynote/password-wrap';
 const String _domainRecoveryWrap = 'encrynote/recovery-wrap';
+const String _domainExport = 'encrynote/export-payload';
 
 class VaultCrypto {
   /// [random] is only for deterministic tests; production uses [Random.secure].
@@ -100,6 +102,34 @@ class VaultCrypto {
   /// Reads the public recovery prompts without running any KDF.
   List<String> readRecoveryQuestions(Uint8List envelope) =>
       _parseEnvelope(envelope).header.questions;
+
+  /// Seals [notes] into a standalone export envelope under [exportPassword].
+  ///
+  /// The export has its own fresh salt and nonce and carries no vault id,
+  /// password wrapper, recovery wrapper, questions, or local key material, so
+  /// the app password and recovery answers cannot open it.
+  Future<Uint8List> exportNotes(List<Note> notes, String exportPassword) async {
+    if (!validPassword(exportPassword)) {
+      throw const VaultException(FailureCode.credentials, 'password.length');
+    }
+    final salt = _randomBytes(_saltLength);
+    final nonce = _randomBytes(_nonceLength);
+    return Isolate.run(() => _exportWorker(notes, exportPassword, salt, nonce));
+  }
+
+  /// Opens an export envelope with [exportPassword] only.
+  Future<List<Note>> importExport(
+    Uint8List bytes,
+    String exportPassword,
+  ) async {
+    if (!validPassword(exportPassword)) {
+      throw const VaultException(FailureCode.credentials, 'password.length');
+    }
+    if (bytes.length > maxEnvelopeBytes) {
+      throw const VaultException(FailureCode.limit, 'envelope');
+    }
+    return Isolate.run(() => _importWorker(bytes, exportPassword));
+  }
 
   Future<Uint8List> seal(
     UnlockedVault vault,
@@ -318,8 +348,130 @@ Future<_Opened> _recoverWorker(Uint8List envelope, List<String> answers) async {
   return (dataKey: dataKeyBytes, json: json);
 }
 
-/// Verifies the key against the existing envelope, then re-seals the payload.
-/// Both steps authenticate the full retained header, so a mismatched key or a
+Future<Uint8List> _exportWorker(
+  List<Note> notes,
+  String exportPassword,
+  Uint8List salt,
+  Uint8List nonce,
+) async {
+  final plain = _exportPayloadBytes(notes);
+  final key = await _deriveKey(exportPassword, salt);
+  final header = _ExportHeader(salt: salt);
+  final box = await AesGcm.with256bits().encrypt(
+    plain,
+    secretKey: key,
+    nonce: nonce,
+    aad: header.payloadAad(),
+  );
+  final payload = _Sealed.fromBox(box);
+  final bytes = Uint8List.fromList(
+    utf8.encode(
+      jsonEncode(<String, dynamic>{
+        'type': 'export',
+        'version': _version,
+        'suite': _suite,
+        'kdf': _kdfJson(salt),
+        'payload': payload.toJson(),
+      }),
+    ),
+  );
+  if (bytes.length > maxEnvelopeBytes) {
+    throw const VaultException(FailureCode.limit, 'envelope');
+  }
+  return bytes;
+}
+
+Future<List<Note>> _importWorker(Uint8List bytes, String exportPassword) async {
+  final parsed = _parseExport(bytes);
+  final key = await _deriveKey(exportPassword, parsed.header.salt);
+  final plain = await _decrypt(
+    parsed.payload,
+    key,
+    parsed.header.payloadAad(),
+    FailureCode.credentials,
+  );
+  if (plain.length > maxPayloadBytes) {
+    throw const VaultException(FailureCode.limit, 'payload');
+  }
+  final List<dynamic> jsonNotes;
+  try {
+    final json = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
+    jsonNotes = json['notes'] as List<dynamic>;
+  } on Object {
+    throw const VaultException(FailureCode.format, 'payload');
+  }
+  try {
+    return [
+      for (final note in jsonNotes) Note.fromJson(note as Map<String, dynamic>),
+    ];
+  } on VaultException {
+    rethrow;
+  } on Object {
+    throw const VaultException(FailureCode.format, 'payload.note');
+  }
+}
+
+/// Serialized export plaintext: notes only, no revision or auto-lock.
+Uint8List _exportPayloadBytes(List<Note> notes) {
+  final plain = Uint8List.fromList(
+    utf8.encode(
+      jsonEncode(<String, dynamic>{
+        'notes': notes.map((note) => note.toJson()).toList(),
+      }),
+    ),
+  );
+  if (plain.length > maxPayloadBytes) {
+    throw const VaultException(FailureCode.limit, 'payload');
+  }
+  return plain;
+}
+
+/// Parses and validates an export header; decodes no payload and runs no KDF.
+_ParsedExport _parseExport(Uint8List bytes) {
+  if (bytes.isEmpty) {
+    throw const VaultException(FailureCode.format, 'export.empty');
+  }
+  if (bytes.length > maxEnvelopeBytes) {
+    throw const VaultException(FailureCode.limit, 'envelope');
+  }
+  final Map<String, dynamic> json;
+  try {
+    json = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+  } on Object {
+    throw const VaultException(FailureCode.format, 'export.json');
+  }
+  if (json['type'] != 'export') {
+    throw const VaultException(FailureCode.unsupported, 'type');
+  }
+  if (json['version'] != _version || json['suite'] != _suite) {
+    throw const VaultException(FailureCode.unsupported, 'suite');
+  }
+  return _ParsedExport(
+    header: _ExportHeader(salt: _kdfSalt(json['kdf'])),
+    payload: _Sealed.parse(json['payload']),
+  );
+}
+
+class _ExportHeader {
+  const _ExportHeader({required this.salt});
+
+  final Uint8List salt;
+
+  /// Binds the format marker and the KDF salt to the ciphertext, so a rewritten
+  /// header fails authentication instead of silently deriving another key.
+  List<int> payloadAad() => utf8.encode(
+    jsonEncode([_domainExport, _version, _suite, base64Encode(salt)]),
+  );
+}
+
+class _ParsedExport {
+  const _ParsedExport({required this.header, required this.payload});
+
+  final _ExportHeader header;
+  final _Sealed payload;
+}
+
+/// Verifies the key against the existing envelope, then re-seals the payload./// Both steps authenticate the full retained header, so a mismatched key or a
 /// tampered header fails closed before any bytes are produced.
 Future<Uint8List> _sealWorker(
   Uint8List dataKeyBytes,

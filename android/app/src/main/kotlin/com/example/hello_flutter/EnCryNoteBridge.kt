@@ -1,9 +1,13 @@
 package com.example.hello_flutter
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import android.system.Os
 import android.system.OsConstants
 import android.view.WindowManager
@@ -12,8 +16,10 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.UUID
 import java.util.concurrent.Executors
 
 /**
@@ -32,6 +38,11 @@ import java.util.concurrent.Executors
  * It also owns the privacy shield and the window-focus stream. The shield is
  * installed from the activity callbacks before the system can snapshot the
  * window; only Flutter removes it, after its own deadline and frame checks.
+ *
+ * File transfer is delegated to the system document UI. A pick stores only the
+ * content URI for the current selection; reading streams that URI with a byte
+ * bound, and nothing in this class accepts a caller-supplied path or caches the
+ * plaintext afterwards.
  */
 class EnCryNoteBridge private constructor(
     private val activity: FlutterActivity,
@@ -44,6 +55,9 @@ class EnCryNoteBridge private constructor(
         private const val STAGED = "vault.next"
         private const val ACTIVE = "vault.enc"
         private const val PREVIOUS = "vault.previous"
+
+        private const val PICK_IMPORT = 4701
+        private const val SAVE_EXPORT = 4702
 
         fun register(messenger: BinaryMessenger, activity: FlutterActivity): EnCryNoteBridge {
             val bridge = EnCryNoteBridge(activity, activity.applicationContext)
@@ -61,6 +75,15 @@ class EnCryNoteBridge private constructor(
     private var shieldVisible = false
     private var focusSink: EventChannel.EventSink? = null
 
+    /** The grant for the selection the picker last returned; a URI, not a path. */
+    private var importGrant: Uri? = null
+
+    /** The opaque handle that names [importGrant]; any other token is refused. */
+    private var importToken: String? = null
+    private var pickResult: MethodChannel.Result? = null
+    private var saveResult: MethodChannel.Result? = null
+    private var pendingExport: ByteArray? = null
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "setPrivacyShield" -> {
@@ -68,9 +91,207 @@ class EnCryNoteBridge private constructor(
                 result.success(null)
             }
             "commitVault" -> commitFrom(call, result)
+            "pickImport" -> pickImport(result)
+            "readImport" -> readImport(call, result)
+            "releaseImport" -> {
+                releaseImport(call.arguments as? String)
+                result.success(null)
+            }
+            "saveExport" -> saveExport(call, result)
             else -> result.notImplemented()
         }
     }
+
+    // --- document picker -----------------------------------------------------
+
+    private fun pickImport(result: MethodChannel.Result) {
+        if (pickResult != null) {
+            result.error("busy", "pick.pending", null)
+            return
+        }
+        pickResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // Only the two shapes import accepts; the app never browses files.
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("text/markdown", "text/plain", "application/octet-stream"),
+            )
+            // Keep the document where it is: no copy, no local-only move.
+            putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+        }
+        try {
+            activity.startActivityForResult(intent, PICK_IMPORT)
+        } catch (error: Exception) {
+            pickResult = null
+            result.error("storage", "pick.launch", null)
+        }
+    }
+
+    /** Called from the activity's `onActivityResult`. */
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        when (requestCode) {
+            PICK_IMPORT -> {
+                val result = pickResult ?: return true
+                pickResult = null
+                val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+                if (uri == null) {
+                    result.success(null)
+                    return true
+                }
+                // Only the temporary grant the picker itself handed us: no
+                // persistable permission and no bookmark, so the access cannot
+                // outlive this process.
+                releaseImport(null)
+                val token = UUID.randomUUID().toString()
+                importGrant = uri
+                importToken = token
+                result.success(
+                    mapOf(
+                        "token" to token,
+                        "name" to (displayName(uri) ?: "import.md"),
+                        "length" to knownLength(uri),
+                    ),
+                )
+                return true
+            }
+            SAVE_EXPORT -> {
+                val result = saveResult ?: return true
+                saveResult = null
+                val bytes = pendingExport
+                pendingExport = null
+                val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+                if (uri == null || bytes == null) {
+                    result.success(false)
+                    return true
+                }
+                worker.execute {
+                    val outcome = try {
+                        context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                            out.write(bytes)
+                            out.flush()
+                        } ?: throw IllegalStateException("save.stream")
+                        null
+                    } catch (error: Exception) {
+                        "save.write"
+                    }
+                    main.post {
+                        if (outcome == null) result.success(true)
+                        else result.error("storage", outcome, null)
+                    }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun displayName(uri: Uri): String? = try {
+        context.contentResolver.query(
+            uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun knownLength(uri: Uri): Long? = try {
+        context.contentResolver.query(
+            uri, arrayOf(OpenableColumns.SIZE), null, null, null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Streams the picked document, refusing more than [maxBytes] even when the
+     * provider reports no size: the bound is enforced on the bytes actually
+     * read, never on metadata alone.
+     */
+    private fun readImport(call: MethodCall, result: MethodChannel.Result) {
+        val token = call.argument<String>("token")
+        val maxBytes = call.argument<Int>("maxBytes")
+        if (token == null || maxBytes == null || maxBytes <= 0) {
+            result.error("format", "read.arguments", null)
+            return
+        }
+        val uri = importGrant
+        // The token must name the selection this bridge actually handed out;
+        // no path and no guessed token can reach a file.
+        if (uri == null || token != importToken) {
+            result.error("storage", "read.grant", null)
+            return
+        }
+        worker.execute {
+            val outcome: Pair<ByteArray?, String?> = try {
+                Pair(readBounded(uri, maxBytes), null)
+            } catch (error: TooLarge) {
+                Pair(null, "limit")
+            } catch (error: Exception) {
+                Pair(null, "read.stream")
+            }
+            main.post {
+                val bytes = outcome.first
+                if (bytes != null) result.success(bytes)
+                else result.error(outcome.second ?: "read.stream", "read", null)
+            }
+        }
+    }
+
+    private class TooLarge : Exception()
+
+    private fun readBounded(uri: Uri, maxBytes: Int): ByteArray {
+        val out = ByteArrayOutputStream()
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (out.size() + read > maxBytes) throw TooLarge()
+                out.write(buffer, 0, read)
+            }
+        } ?: throw IllegalStateException("read.stream")
+        return out.toByteArray()
+    }
+
+    private fun releaseImport(token: String?) {
+        // Only the current grant can be dropped; a stale token is a no-op.
+        if (token != null && token != importToken) return
+        importGrant = null
+        importToken = null
+    }
+
+    private fun saveExport(call: MethodCall, result: MethodChannel.Result) {
+        if (saveResult != null) {
+            result.error("busy", "save.pending", null)
+            return
+        }
+        val bytes = call.argument<ByteArray>("bytes")
+        val fileName = call.argument<String>("fileName")
+        if (bytes == null || fileName == null || fileName.contains('/')) {
+            result.error("format", "save.arguments", null)
+            return
+        }
+        saveResult = result
+        pendingExport = bytes
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+        }
+        try {
+            activity.startActivityForResult(intent, SAVE_EXPORT)
+        } catch (error: Exception) {
+            saveResult = null
+            pendingExport = null
+            result.error("storage", "save.launch", null)
+        }
+    }
+
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
         focusSink = events

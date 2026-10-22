@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:hello_flutter/platform/native_bridge.dart';
 import 'package:hello_flutter/vault/vault_types.dart';
@@ -53,6 +54,83 @@ class FakeNativeBridge implements NativeBridge {
   @override
   Stream<bool> get focusChanges => _focus.stream;
 
+  // --- import/export seams -------------------------------------------------
+
+  /// Returned by the next [pickImport]; `null` models a cancelled picker.
+  PickedImport? nextPicked;
+
+  /// Bytes the next [readImport] hands back.
+  Uint8List? importBytes;
+
+  /// Fails the next read with a storage failure.
+  bool failRead = false;
+
+  /// Fails the next export save with a storage failure.
+  bool failSave = false;
+
+  /// Returned by the next [saveExport]; `false` models a cancelled save.
+  bool saveResult = true;
+
+  /// Holds the export save open until completed, so a lock can land while the
+  /// native panel is up.
+  Completer<void>? saveGate;
+
+  /// Holds the open panel until completed, so a lock can land while it is up.
+  Completer<void>? pickGate;
+
+  int pickCalls = 0;
+  final List<String> readTokens = [];
+  final List<int> readLimits = [];
+  final List<String> released = [];
+  String? savedFileName;
+  Uint8List? savedExport;
+
+  @override
+  Future<PickedImport?> pickImport() async {
+    pickCalls++;
+    final gate = pickGate;
+    if (gate != null) await gate.future;
+    return nextPicked;
+  }
+
+  @override
+  Future<Uint8List> readImport(String token, {required int maxBytes}) async {
+    readTokens.add(token);
+    readLimits.add(maxBytes);
+    if (failRead) {
+      failRead = false;
+      throw const VaultException(FailureCode.storage, 'read.failed');
+    }
+    final bytes = importBytes ?? Uint8List(0);
+    if (bytes.length > maxBytes) {
+      throw const VaultException(FailureCode.limit, 'read.size');
+    }
+    return bytes;
+  }
+
+  @override
+  Future<void> releaseImport(String token) async {
+    released.add(token);
+  }
+
+  @override
+  Future<bool> saveExport(Uint8List bytes, {required String fileName}) async {
+    final gate = saveGate;
+    if (gate != null) {
+      savedFileName = fileName;
+      savedExport = Uint8List.fromList(bytes);
+      await gate.future;
+    }
+    if (failSave) {
+      failSave = false;
+      throw const VaultException(FailureCode.storage, 'save.failed');
+    }
+    if (!saveResult) return false;
+    savedFileName = fileName;
+    savedExport = Uint8List.fromList(bytes);
+    return true;
+  }
+
   /// Mirrors the native idempotence: repeating the current state is a no-op.
   @override
   Future<void> setPrivacyShield(bool visible) async {
@@ -68,6 +146,10 @@ class FakeNativeBridge implements NativeBridge {
 
   /// Shorthand for `failAt = CommitStage.backup`, used by the brief's snippet.
   bool failNextCommit = false;
+
+  /// Fails every commit at [CommitStage.backup] until cleared, for a storage
+  /// fault that outlives one retry.
+  bool failEveryCommit = false;
 
   /// Makes the rollback attempt itself fail, modelling an I/O fault that leaves
   /// the active file in an unknown generation.
@@ -100,7 +182,11 @@ class FakeNativeBridge implements NativeBridge {
     ));
     commitCount++;
 
-    final failure = failAt ?? (failNextCommit ? CommitStage.backup : null);
+    final failure =
+        failAt ??
+        (failEveryCommit
+            ? CommitStage.backup
+            : (failNextCommit ? CommitStage.backup : null));
     failAt = null;
     failNextCommit = false;
 

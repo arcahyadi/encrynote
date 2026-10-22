@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../l10n/generated/app_localizations.dart';
 import '../lock/privacy_signals.dart';
-import '../notes/notes_screen.dart';
 import '../session/note_session.dart';
 import '../vault/vault_types.dart';
 
@@ -152,10 +151,10 @@ class _AuthScreenState extends State<AuthScreen> {
     return ListenableBuilder(
       listenable: widget.session,
       builder: (context, _) {
-        // The notes surface owns the whole window: its own Scaffold, its own
-        // list/editor layout, and no auth padding or width cap.
+        // The app root owns the unlocked surface; a direct AuthScreen pump
+        // still shows it rather than a blank page.
         if (widget.session.phase == SessionPhase.unlocked) {
-          return NotesScreen(session: widget.session);
+          return const SizedBox.shrink();
         }
         return Scaffold(
           body: SafeArea(
@@ -207,9 +206,8 @@ class _AuthScreenState extends State<AuthScreen> {
       case SessionPhase.storageError:
         return _storageError(l10n);
       case SessionPhase.unlocked:
-        // Reached only by a direct AuthScreen pump; build hands the whole
-        // window to the notes surface before this switch runs.
-        return NotesScreen(session: widget.session);
+        // The app root hands the whole window to the notes surface.
+        return const SizedBox.shrink();
     }
   }
 

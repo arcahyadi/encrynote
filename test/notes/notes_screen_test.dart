@@ -8,6 +8,7 @@ import 'package:hello_flutter/lock/privacy_signals.dart';
 import 'package:hello_flutter/l10n/generated/app_localizations.dart';
 import 'package:hello_flutter/notes/notes_screen.dart';
 import 'package:hello_flutter/session/note_session.dart';
+import 'package:hello_flutter/transfer/transfer_service.dart';
 import 'package:hello_flutter/vault/vault_crypto.dart';
 import 'package:hello_flutter/vault/vault_store.dart';
 import 'package:hello_flutter/vault/vault_types.dart';
@@ -29,8 +30,10 @@ void main() {
   late Directory dir;
   late FakeNativeBridge native;
   late NoteSession session;
+  late TransferService transfer;
   late SealFailureCrypto sealCrypto;
   late NoteSession sealSession;
+  late TransferService sealTransfer;
   var scratch = 0;
 
   setUpAll(() async {
@@ -69,11 +72,23 @@ void main() {
       crypto: sealCrypto,
       store: VaultStore(directory: dir, native: native),
     );
+    transfer = TransferService(
+      session: session,
+      crypto: crypto,
+      native: native,
+    );
+    sealTransfer = TransferService(
+      session: sealSession,
+      crypto: sealCrypto,
+      native: native,
+    );
   });
 
   tearDown(() {
     session.dispose();
     sealSession.dispose();
+    transfer.dispose();
+    sealTransfer.dispose();
   });
 
   Future<T> io<T>(WidgetTester tester, Future<T> Function() body) async {
@@ -128,7 +143,7 @@ void main() {
               .copyWith(textScaler: TextScaler.linear(textScale)),
           child: child!,
         ),
-        home: NotesScreen(session: session),
+        home: NotesScreen(session: session, transfer: transfer),
       ),
     );
     await tester.pump();
@@ -139,7 +154,7 @@ void main() {
     Size size = const Size(800, 1200),
   }) async {
     useSize(tester, size);
-    await tester.pumpWidget(EnCryNoteApp(session: session));
+    await tester.pumpWidget(EnCryNoteApp(session: session, transfer: transfer));
     await tester.pump();
   }
 
@@ -529,7 +544,7 @@ void main() {
         home: PrivacySignals(
           activity: activity,
           leavings: leavings,
-          child: NotesScreen(session: session),
+          child: NotesScreen(session: session, transfer: transfer),
         ),
       ),
     );
@@ -646,7 +661,9 @@ void main() {
   ) async {
     await openSealVault(tester);
     useSize(tester, const Size(800, 1200));
-    await tester.pumpWidget(EnCryNoteApp(session: sealSession));
+    await tester.pumpWidget(
+      EnCryNoteApp(session: sealSession, transfer: sealTransfer),
+    );
     await tester.pump();
     await tester.tap(
       find.byKey(ValueKey('noteTile:${fixtureData.notes.single.id}')),
@@ -707,7 +724,9 @@ void main() {
   ) async {
     await openSealVault(tester);
     useSize(tester, const Size(800, 1200));
-    await tester.pumpWidget(EnCryNoteApp(session: sealSession));
+    await tester.pumpWidget(
+      EnCryNoteApp(session: sealSession, transfer: sealTransfer),
+    );
     await tester.pump();
     await tester.tap(
       find.byKey(ValueKey('noteTile:${fixtureData.notes.single.id}')),
@@ -814,7 +833,7 @@ void main() {
     tester,
   ) async {
     useSize(tester, const Size(800, 1200));
-    await tester.pumpWidget(EnCryNoteApp(session: session));
+    await tester.pumpWidget(EnCryNoteApp(session: session, transfer: transfer));
     await tester.pump();
 
     expect(find.text('Opening your vault...'), findsOneWidget);

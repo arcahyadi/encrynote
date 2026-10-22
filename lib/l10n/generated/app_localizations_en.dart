@@ -237,4 +237,56 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsSaveFailed =>
       'The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds.';
+
+  @override
+  String get exportNotesButton => 'Export notes';
+
+  @override
+  String get importNotesButton => 'Import notes';
+
+  @override
+  String get exportDialogTitle => 'Export notes';
+
+  @override
+  String get exportPasswordLabel => 'Export password';
+
+  @override
+  String get confirmExportPasswordLabel => 'Confirm export password';
+
+  @override
+  String get exportButton => 'Export';
+
+  @override
+  String get exportFailed =>
+      'The export could not be saved. Nothing was changed; try again.';
+
+  @override
+  String get exportNoRecoveryWarning =>
+      'The export is protected by this export password only. Your recovery questions cannot open it, and a forgotten export password cannot be recovered.';
+
+  @override
+  String get importDialogTitle => 'Import notes';
+
+  @override
+  String get importButton => 'Import';
+
+  @override
+  String get importFailed =>
+      'The file could not be imported. Your notes were not changed.';
+
+  @override
+  String get importWrongPassword =>
+      'That export password is incorrect. Your notes were not changed.';
+
+  @override
+  String get importLimit =>
+      'This file is too large to import. Your notes were not changed.';
+
+  @override
+  String get importUnsupported =>
+      'This file is not a supported .encrynote or .md file. Your notes were not changed.';
+
+  @override
+  String get importMarkdownWarning =>
+      'A plain Markdown file is stored encrypted in EnCryNote, but the original .md file outside the app stays plaintext.';
 }

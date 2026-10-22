@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -119,6 +120,20 @@ class _RecordingBridge implements NativeBridge {
     await _inner.setPrivacyShield(visible);
     shielded = visible;
   }
+
+  @override
+  Future<PickedImport?> pickImport() => _inner.pickImport();
+
+  @override
+  Future<Uint8List> readImport(String token, {required int maxBytes}) =>
+      _inner.readImport(token, maxBytes: maxBytes);
+
+  @override
+  Future<void> releaseImport(String token) => _inner.releaseImport(token);
+
+  @override
+  Future<bool> saveExport(Uint8List bytes, {required String fileName}) =>
+      _inner.saveExport(bytes, fileName: fileName);
 
   @override
   Future<void> commitVault({

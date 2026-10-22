@@ -90,5 +90,20 @@
   "autoLockTenMinutes": "10 minutes",
   "settingsLockedHint": "Your vault is locked. Unlock to change this.",
   "settingsFrozenHint": "A change is not saved yet. Auto-lock stays read-only until the save succeeds.",
-  "settingsSaveFailed": "The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds."
+  "settingsSaveFailed": "The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds.",
+  "exportNotesButton": "Export notes",
+  "importNotesButton": "Import notes",
+  "exportDialogTitle": "Export notes",
+  "exportPasswordLabel": "Export password",
+  "confirmExportPasswordLabel": "Confirm export password",
+  "exportButton": "Export",
+  "exportFailed": "The export could not be saved. Nothing was changed; try again.",
+  "exportNoRecoveryWarning": "The export is protected by this export password only. Your recovery questions cannot open it, and a forgotten export password cannot be recovered.",
+  "importDialogTitle": "Import notes",
+  "importButton": "Import",
+  "importFailed": "The file could not be imported. Your notes were not changed.",
+  "importWrongPassword": "That export password is incorrect. Your notes were not changed.",
+  "importLimit": "This file is too large to import. Your notes were not changed.",
+  "importUnsupported": "This file is not a supported .encrynote or .md file. Your notes were not changed.",
+  "importMarkdownWarning": "A plain Markdown file is stored encrypted in EnCryNote, but the original .md file outside the app stays plaintext."
 }

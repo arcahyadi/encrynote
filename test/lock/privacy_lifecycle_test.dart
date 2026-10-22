@@ -8,6 +8,7 @@ import 'package:hello_flutter/app.dart';
 import 'package:hello_flutter/platform/native_bridge.dart';
 import 'package:hello_flutter/platform/privacy_lifecycle.dart';
 import 'package:hello_flutter/session/note_session.dart';
+import 'package:hello_flutter/transfer/transfer_service.dart';
 import 'package:hello_flutter/vault/vault_crypto.dart';
 import 'package:hello_flutter/vault/vault_store.dart';
 import 'package:hello_flutter/vault/vault_types.dart';
@@ -26,6 +27,7 @@ void main() {
   late Directory dir;
   late FakeNativeBridge native;
   late NoteSession session;
+  late TransferService transfer;
   // Controllable clocks: pumping fake time alone does not move the real clock
   // the lifecycle would otherwise use.
   late DateTime now;
@@ -59,10 +61,16 @@ void main() {
       crypto: crypto,
       store: VaultStore(directory: dir, native: native),
     );
+    transfer = TransferService(
+      session: session,
+      crypto: crypto,
+      native: native,
+    );
   });
 
   tearDown(() {
     session.dispose();
+    transfer.dispose();
   });
 
   Future<T> io<T>(WidgetTester tester, Future<T> Function() body) async {
@@ -163,7 +171,7 @@ void main() {
         native: native,
         now: () => now,
         elapsed: () => elapsed,
-        child: EnCryNoteApp(session: session),
+        child: EnCryNoteApp(session: session, transfer: transfer),
       ),
     );
     await tester.pump();

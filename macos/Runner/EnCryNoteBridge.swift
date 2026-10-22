@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import UniformTypeIdentifiers
 
 /// Replaces the vault on disk with an explicit commit point.
 ///
@@ -17,6 +18,11 @@ import FlutterMacOS
 /// installed when the app or its window loses key status, before AppKit can
 /// snapshot the window; only Flutter removes it, after its deadline and frame
 /// checks.
+///
+/// File transfer goes through NSOpenPanel/NSSavePanel. A pick keeps only the
+/// security-scoped URL for the current selection; a read starts that scope,
+/// streams with a byte bound, and stops it again. No path from Flutter is ever
+/// opened, and no plaintext copy is cached.
 final class EnCryNoteBridge: NSObject, FlutterPlugin, FlutterStreamHandler {
   private static let channelName = "encrynote/platform"
   private static let focusChannelName = "encrynote/focus"
@@ -24,10 +30,17 @@ final class EnCryNoteBridge: NSObject, FlutterPlugin, FlutterStreamHandler {
   private static let activeName = "vault.enc"
   private static let previousName = "vault.previous"
 
+  /// Bounds the bytes a read may hand back even when the file reports no size.
+  private static let readChunk = 64 * 1024
+
   private let queue = DispatchQueue(label: "encrynote.commit")
   private weak var registrarView: NSView?
   private var shield: NSView?
   private var focusSink: FlutterEventSink?
+
+  /// The security-scoped URL the picker last returned, plus its opaque handle.
+  private var importURL: URL?
+  private var importToken: String?
 
   /// Test seam: whether the opaque cover is currently installed.
   var isShieldInstalled: Bool { shield != nil }
@@ -103,8 +116,136 @@ final class EnCryNoteBridge: NSObject, FlutterPlugin, FlutterStreamHandler {
       result(nil)
     case "commitVault":
       commitCall(call, result: result)
+    case "pickImport":
+      pickImport(result: result)
+    case "readImport":
+      readImport(call, result: result)
+    case "releaseImport":
+      releaseImport(call.arguments as? String)
+      result(nil)
+    case "saveExport":
+      saveExport(call, result: result)
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  // --- document panels -----------------------------------------------------
+
+  /// Shows an open panel and keeps only a security-scoped URL for the choice.
+  private func pickImport(result: @escaping FlutterResult) {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    // No network volumes and no packages: this is a local note file.
+    panel.resolvesAliases = false
+    panel.treatsFilePackagesAsDirectories = false
+    panel.allowedContentTypes = [.plainText, .data]
+    panel.begin { response in
+      guard response == .OK, let url = panel.url else {
+        result(nil)
+        return
+      }
+      self.releaseImport(nil)
+      let token = UUID().uuidString
+      self.importURL = url
+      self.importToken = token
+      let length = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+      result([
+        "token": token,
+        "name": url.lastPathComponent,
+        "length": length as Any,
+      ])
+    }
+  }
+
+  /// Streams the picked file inside its security scope, refusing more than
+  /// `maxBytes` on the bytes read rather than on a reported size.
+  private func readImport(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let arguments = call.arguments as? [String: Any]
+    guard let token = arguments?["token"] as? String,
+      let maxBytes = arguments?["maxBytes"] as? Int, maxBytes > 0
+    else {
+      result(FlutterError(code: "format", message: "read.arguments", details: nil))
+      return
+    }
+    guard let url = importURL, token == importToken else {
+      result(FlutterError(code: "storage", message: "read.grant", details: nil))
+      return
+    }
+    queue.async {
+      let scoped = url.startAccessingSecurityScopedResource()
+      defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+      do {
+        let data = try Self.readBounded(url, maxBytes: maxBytes)
+        DispatchQueue.main.async { result(FlutterStandardTypedData(bytes: data)) }
+      } catch ReadFailure.tooLarge {
+        DispatchQueue.main.async {
+          result(FlutterError(code: "limit", message: "read.size", details: nil))
+        }
+      } catch {
+        DispatchQueue.main.async {
+          result(FlutterError(code: "storage", message: "read.stream", details: nil))
+        }
+      }
+    }
+  }
+
+  private enum ReadFailure: Error { case tooLarge }
+
+  private static func readBounded(_ url: URL, maxBytes: Int) throws -> Data {
+    guard let handle = try? FileHandle(forReadingFrom: url) else {
+      throw ReadFailure.tooLarge
+    }
+    defer { try? handle.close() }
+    var data = Data()
+    while true {
+      let chunk = try handle.read(upToCount: readChunk) ?? Data()
+      if chunk.isEmpty { break }
+      if data.count + chunk.count > maxBytes { throw ReadFailure.tooLarge }
+      data.append(chunk)
+    }
+    return data
+  }
+
+  private func releaseImport(_ token: String?) {
+    // Only the current selection can be dropped; a stale token is a no-op.
+    if let token = token, token != importToken { return }
+    importURL = nil
+    importToken = nil
+  }
+
+  /// Shows a save panel and writes only the ciphertext Flutter prepared.
+  private func saveExport(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let arguments = call.arguments as? [String: Any]
+    guard let typed = arguments?["bytes"] as? FlutterStandardTypedData,
+      let fileName = arguments?["fileName"] as? String,
+      !fileName.contains("/")
+    else {
+      result(FlutterError(code: "format", message: "save.arguments", details: nil))
+      return
+    }
+    let bytes = typed.data
+    let panel = NSSavePanel()
+    panel.canCreateDirectories = true
+    panel.nameFieldStringValue = fileName
+    panel.begin { response in
+      guard response == .OK, let url = panel.url else {
+        result(false)
+        return
+      }
+      let scoped = url.startAccessingSecurityScopedResource()
+      defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+      do {
+        try bytes.write(to: url, options: .atomic)
+        result(true)
+      } catch {
+        result(
+          FlutterError(
+            code: "storage", message: "save.write",
+            details: error.localizedDescription))
+      }
     }
   }
 

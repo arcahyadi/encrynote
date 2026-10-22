@@ -513,6 +513,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds.'**
   String get settingsSaveFailed;
+
+  /// No description provided for @exportNotesButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Export notes'**
+  String get exportNotesButton;
+
+  /// No description provided for @importNotesButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Import notes'**
+  String get importNotesButton;
+
+  /// No description provided for @exportDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Export notes'**
+  String get exportDialogTitle;
+
+  /// No description provided for @exportPasswordLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Export password'**
+  String get exportPasswordLabel;
+
+  /// No description provided for @confirmExportPasswordLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm export password'**
+  String get confirmExportPasswordLabel;
+
+  /// No description provided for @exportButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Export'**
+  String get exportButton;
+
+  /// No description provided for @exportFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The export could not be saved. Nothing was changed; try again.'**
+  String get exportFailed;
+
+  /// No description provided for @exportNoRecoveryWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'The export is protected by this export password only. Your recovery questions cannot open it, and a forgotten export password cannot be recovered.'**
+  String get exportNoRecoveryWarning;
+
+  /// No description provided for @importDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Import notes'**
+  String get importDialogTitle;
+
+  /// No description provided for @importButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get importButton;
+
+  /// No description provided for @importFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be imported. Your notes were not changed.'**
+  String get importFailed;
+
+  /// No description provided for @importWrongPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'That export password is incorrect. Your notes were not changed.'**
+  String get importWrongPassword;
+
+  /// No description provided for @importLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'This file is too large to import. Your notes were not changed.'**
+  String get importLimit;
+
+  /// No description provided for @importUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'This file is not a supported .encrynote or .md file. Your notes were not changed.'**
+  String get importUnsupported;
+
+  /// No description provided for @importMarkdownWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'A plain Markdown file is stored encrypted in EnCryNote, but the original .md file outside the app stays plaintext.'**
+  String get importMarkdownWarning;
 }
 
 class _AppLocalizationsDelegate

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hello_flutter/app.dart';
 import 'package:hello_flutter/lock/privacy_signals.dart';
 import 'package:hello_flutter/session/note_session.dart';
+import 'package:hello_flutter/transfer/transfer_service.dart';
 import 'package:hello_flutter/vault/vault_crypto.dart';
 import 'package:hello_flutter/vault/vault_store.dart';
 import 'package:hello_flutter/vault/vault_types.dart';
@@ -27,6 +28,7 @@ void main() {
   late Directory dir;
   late FakeNativeBridge native;
   late NoteSession session;
+  late TransferService transfer;
   var scratch = 0;
 
   setUpAll(() async {
@@ -54,10 +56,16 @@ void main() {
       crypto: crypto,
       store: VaultStore(directory: dir, native: native),
     );
+    transfer = TransferService(
+      session: session,
+      crypto: crypto,
+      native: native,
+    );
   });
 
   tearDown(() {
     session.dispose();
+    transfer.dispose();
   });
 
   Future<T> io<T>(WidgetTester tester, Future<T> Function() body) async {
@@ -77,7 +85,7 @@ void main() {
       io(tester, () => File('${dir.path}/vault.enc').writeAsBytes(seed));
 
   Future<void> pumpApp(WidgetTester tester) async {
-    await tester.pumpWidget(EnCryNoteApp(session: session));
+    await tester.pumpWidget(EnCryNoteApp(session: session, transfer: transfer));
     await tester.pump();
   }
 
@@ -424,7 +432,7 @@ void main() {
       PrivacySignals(
         activity: activity,
         leavings: leavings,
-        child: EnCryNoteApp(session: session),
+        child: EnCryNoteApp(session: session, transfer: transfer),
       ),
     );
     await tester.pump();

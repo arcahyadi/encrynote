@@ -500,6 +500,12 @@ class NoteSession extends ChangeNotifier {
   }
 
   /// Appends imported notes under fresh local ids in one commit.
+  ///
+  /// The batch is accepted and committed as one snapshot, so success is only
+  /// reported after the commit point. A known-failed commit withdraws the batch
+  /// again, so neither autosave nor a resume can write it later; a commit whose
+  /// outcome is unknown keeps the frozen retry surface, because only a
+  /// reconcile can say what landed.
   Future<void> appendImported(List<Note> notes) async {
     _requireMutable();
     if (notes.isEmpty) return;
@@ -514,10 +520,59 @@ class NoteSession extends ChangeNotifier {
           updatedAt: note.updatedAt,
         ),
     ];
-    await _accept(
-      data.copyWith(notes: [...data.notes, ...added]),
-      immediate: true,
-    );
+    final batch = _accepted + 1;
+    try {
+      await _accept(
+        data.copyWith(notes: [...data.notes, ...added]),
+        immediate: true,
+      );
+    } on VaultException {
+      // Decided inside the queue: a lock or retry queued behind the failure may
+      // already have committed these bytes, and only the queue can tell.
+      var stands = true;
+      await _enqueue(() async => stands = _settleFailedImport(data, batch));
+      if (stands) rethrow;
+    }
+  }
+
+  /// Runs after a failed import commit and returns whether the failure stands.
+  ///
+  /// The store's contract for a reported failure is that the previous
+  /// generation is active, so a still-failing batch is simply dropped: no second
+  /// write is needed and none is attempted. If a retry already committed it, the
+  /// batch is durable and the caller must not report a failure.
+  bool _settleFailedImport(VaultData before, int batch) {
+    // An uncertain outcome is never guessed at, and a newer accepted edit owns
+    // the retry surface that now covers this batch.
+    if (_uncertain || _accepted != batch) return true;
+    if (!_failed && _pending == null && _sealedAt >= batch) return false;
+    // A snapshot at this watermark is this batch's own ciphertext and was never
+    // committed, so dropping it loses nothing the disk does not already have.
+    if (_sealedAt == batch) {
+      _pending = null;
+      _pendingData = null;
+      _pendingRevision = null;
+    }
+    _uncertain = false;
+    _failed = false;
+    _failure = null;
+    _accepted = batch - 1;
+    _sealedAt = batch - 1;
+    // A lock that already finished dropped the key and the notes; nothing here
+    // may bring plaintext back.
+    if (_phase == SessionPhase.locked) {
+      _notify();
+      return true;
+    }
+    _data = before;
+    _autoLock = before.autoLock;
+    if (_lockRequested) {
+      _finishLock();
+    } else {
+      _phase = SessionPhase.unlocked;
+      _notify();
+    }
+    return true;
   }
 
   /// Drops every key and plaintext copy once the lock's accepted edits are all
