@@ -43,7 +43,7 @@
 - [x] Task 4: Setup/unlock English dan integrasi aplikasi bernama EnCryNote.
 - [x] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
 - [x] Task 6: Daftar catatan dan editor Write/Preview yang benar-benar berfungsi.
-- [ ] Task 7: Ekspor terenkripsi dan impor Markdown/encrypted export tanpa cache plaintext.
+- [x] Task 7: Ekspor terenkripsi dan impor Markdown/encrypted export tanpa cache plaintext.
 - [ ] Task 8: Pemeriksaan lintas platform, offline, lisensi, dan panduan kontribusi.
 
 ## File map dan kontrak bersama
@@ -227,7 +227,7 @@ expect(tester.widget<TextField>(find.byKey(const ValueKey('markdownInput'))).con
 
 Task ini sengaja memperluas constructor app menjadi `EnCryNoteApp({required NoteSession session, required TransferService transfer})` dan daftar menjadi `NotesScreen({required NoteSession session, required TransferService transfer})`. Buat service sekali di main, teruskan ke app/daftar, grep seluruh caller dan sesuaikan fixtures/test pada task ini; constructor `AuthScreen`, `NoteEditor`, dan `PrivacyLifecycle` tidak berubah.
 
-- [ ] **Step 1:** Tulis test gagal export/import round-trip, export menolak password salah/tamper, tidak ada wrapper/recovery dalam struktur ekspor, dan Markdown vanilla tanpa front matter. Assertions inti:
+- [x] **Step 1:** Tulis test gagal export/import round-trip, export menolak password salah/tamper, tidak ada wrapper/recovery dalam struktur ekspor, dan Markdown vanilla tanpa front matter. Assertions inti:
 
 ```dart
 final bytes = await crypto.exportNotes(fixtureData.notes, 'export-1234');
@@ -238,13 +238,13 @@ await expectLater(crypto.recover(bytes, fixtureRecovery.answers), throwsA(isA<Va
 ```
 
   Tambahkan test BOM/CRLF/emoji, UTF-8 rusak, file kosong, panjang yang tidak diketahui, stream melebihi limit, filename traversal yang hanya boleh menjadi basename judul, duplikat menambah ID baru, limit keseluruhan setelah batch, serta cancel/failure tanpa mutasi. Pastikan nilai password aplikasi dan ekspor yang kebetulan sama tetap melalui jalur ekspor saja.
-- [ ] **Step 2:** Jalankan `flutter test test/transfer` dan pastikan RED sesuai perilaku yang belum tersedia.
-- [ ] **Step 3:** Implementasikan envelope export tanpa data key/wrapper/pertanyaan lokal, AEAD dengan salt/nonce baru, tipe/version/AAD yang membedakannya dari vault. `.md` dibaca UTF-8 dengan BOM opsional; isi termasuk CRLF dipertahankan, judul basename tanpa ekstensi, fallback Untitled. `appendImported` menyimpan satu batch dengan ID baru dan tidak menimpa.
-- [ ] **Step 4:** Implementasikan native picker tanpa plugin caching: Android memakai ACTION_OPEN_DOCUMENT dan ContentResolver bounded stream, grant sementara/read-only, local-only hint; macOS memakai NSOpenPanel dan security-scoped URL sementara. Pick mengembalikan handle saja, pembacaan baru setelah sesi unlock; selalu release handle. Jumlah byte dibatasi saat streaming meskipun length tidak tersedia. Jangan mengandalkan cleanup cache plaintext sesudahnya.
-- [ ] **Step 5:** Export menyiapkan ciphertext lebih dahulu; Android ACTION_CREATE_DOCUMENT dan macOS NSSavePanel hanya menerima ciphertext. Native bridge tidak membaca path arbitrer dari Markdown dan tidak menulis plaintext sementara. Tambahkan `com.apple.security.files.user-selected.read-write` pada kedua entitlements macOS, tanpa mematikan sandbox atau mengaktifkan network.
-- [ ] **Step 6:** Hubungkan dialog English `Export notes`, konfirmasi password, warning file ekspor tidak punya recovery, dan warning `.md` asli tetap plaintext. Root app mengamati service, menutup dialog produk serta membuang controller rahasia saat lock, dan mempertahankan hanya handle impor pending. Native dialog blur tetap mengunci mode Immediately; setelah unlock, root menawarkan kelanjutan impor handle tersebut tanpa mengulang picker. Siapkan ciphertext dan lepaskan referensi plaintext/password sebelum dialog ekspor native. Cancel pada tahap mana pun me-release handle, tidak mengubah catatan atau menghapus file sumber.
+- [x] **Step 2:** Jalankan `flutter test test/transfer` dan pastikan RED sesuai perilaku yang belum tersedia.
+- [x] **Step 3:** Implementasikan envelope export tanpa data key/wrapper/pertanyaan lokal, AEAD dengan salt/nonce baru, tipe/version/AAD yang membedakannya dari vault. `.md` dibaca UTF-8 dengan BOM opsional; isi termasuk CRLF dipertahankan, judul basename tanpa ekstensi, fallback Untitled. `appendImported` menyimpan satu batch dengan ID baru dan tidak menimpa.
+- [x] **Step 4:** Implementasikan native picker tanpa plugin caching: Android memakai ACTION_OPEN_DOCUMENT dan ContentResolver bounded stream, grant sementara/read-only, local-only hint; macOS memakai NSOpenPanel dan security-scoped URL sementara. Pick mengembalikan handle saja, pembacaan baru setelah sesi unlock; selalu release handle. Jumlah byte dibatasi saat streaming meskipun length tidak tersedia. Jangan mengandalkan cleanup cache plaintext sesudahnya.
+- [x] **Step 5:** Export menyiapkan ciphertext lebih dahulu; Android ACTION_CREATE_DOCUMENT dan macOS NSSavePanel hanya menerima ciphertext. Native bridge tidak membaca path arbitrer dari Markdown dan tidak menulis plaintext sementara. Tambahkan `com.apple.security.files.user-selected.read-write` pada kedua entitlements macOS, tanpa mematikan sandbox atau mengaktifkan network.
+- [x] **Step 6:** Hubungkan dialog English `Export notes`, konfirmasi password, warning file ekspor tidak punya recovery, dan warning `.md` asli tetap plaintext. Root app mengamati service, menutup dialog produk serta membuang controller rahasia saat lock, dan mempertahankan hanya handle impor pending. Native dialog blur tetap mengunci mode Immediately; setelah unlock, root menawarkan kelanjutan impor handle tersebut tanpa mengulang picker. Siapkan ciphertext dan lepaskan referensi plaintext/password sebelum dialog ekspor native. Cancel pada tahap mana pun me-release handle, tidak mengubah catatan atau menghapus file sumber.
 - [ ] **Step 7:** Jalankan unit/widget tests transfer dan integration test native; periksa direktori cache/support aplikasi sesudah raw import menggunakan marker yang baru dibuat saat runtime (agar tidak salah membaca literal dari bundle test): tidak ada salinan plaintext marker. File `.md` sumber yang sengaja dipilih tidak ikut dianggap cache aplikasi. Uji transfer Android-ke-macOS dan sebaliknya, bukan hanya export/import pada mesin yang sama.
-- [ ] **Step 8:** Commit: `feat: add password-isolated encrypted note transfer`.
+- [x] **Step 8:** Commit: `feat: add password-isolated encrypted note transfer`.
 
 ### Task 8: Verifikasi rilis lokal dan kontribusi open source
 
