@@ -159,6 +159,11 @@ void main() {
     expect(session.needsReload, isFalse);
     expect(session.data, isNotNull, reason: 'frozen data stays readable');
     expect(
+      session.holdsSensitiveState,
+      isTrue,
+      reason: 'the retry still needs the key and the frozen notes',
+    );
+    expect(
       session.canMutate,
       isFalse,
       reason: 'readable frozen data is not permission to edit',
@@ -656,6 +661,157 @@ void main() {
     gateEntered = entered;
     gateRelease = release;
   }
+
+  test('lock drops the plaintext copy of a sealed edit', () async {
+    await unlockSeeded();
+    native.failNextCommit = true;
+    await expectLater(
+      session.saveNote(editedNote('sealed but unwritten')),
+      throwsA(isA<VaultException>()),
+    );
+    expect(
+      session.holdsSensitiveState,
+      isTrue,
+      reason: 'the frozen session still holds its key and notes',
+    );
+
+    // The final lock attempt fails too, so only the ciphertext can wait.
+    native.failNextCommit = true;
+    await session.lock();
+
+    expect(session.phase, SessionPhase.locked);
+    expect(session.data, isNull);
+    expect(
+      session.holdsSensitiveState,
+      isFalse,
+      reason: 'after lock only ciphertext may wait for retry',
+    );
+
+    // The retained ciphertext alone still recovers the edit.
+    await session.unlock(localPassword);
+    expect(session.data!.notes.single.markdown, 'sealed but unwritten');
+  });
+
+  test(
+    'retry after lock commits ciphertext without reopening the vault',
+    () async {
+      await unlockSeeded();
+      native.failNextCommit = true;
+      await expectLater(
+        session.saveNote(editedNote('waits as ciphertext')),
+        throwsA(isA<VaultException>()),
+      );
+      native.failNextCommit = true;
+      await session.lock();
+      expect(session.phase, SessionPhase.locked);
+      expect(session.holdsSensitiveState, isFalse);
+
+      final before = native.commitCount;
+      await session.retrySave();
+
+      expect(native.commitCount, before + 1);
+      expect(
+        session.phase,
+        SessionPhase.locked,
+        reason: 'writing a sealed snapshot never unlocks the session',
+      );
+      expect(session.data, isNull);
+      expect(session.holdsSensitiveState, isFalse);
+
+      await session.unlock(localPassword);
+      expect(session.data!.notes.single.markdown, 'waits as ciphertext');
+    },
+  );
+
+  test(
+    'an uncertain pending snapshot settles after lock without a key',
+    () async {
+      await unlockSeeded();
+      native.failAt = CommitStage.backup;
+      await expectLater(
+        session.saveNote(editedNote('uncertain body')),
+        throwsA(isA<VaultException>()),
+      );
+
+      // The lock's own write is left uncertain too, so the sealed snapshot
+      // survives the lock while the plaintext copy does not.
+      native.failAt = CommitStage.dirSync;
+      native.rollbackFails = true;
+      await session.lock();
+      expect(session.phase, SessionPhase.locked);
+      expect(session.holdsSensitiveState, isFalse);
+
+      await session.retrySave();
+      expect(session.phase, SessionPhase.locked);
+      expect(session.data, isNull);
+      expect(session.holdsSensitiveState, isFalse);
+
+      await session.unlock(localPassword);
+      expect(session.data!.notes.single.markdown, 'uncertain body');
+    },
+  );
+
+  test('lock drops the recovery key without ever opening notes', () async {
+    await seedVault();
+    await session.load();
+    expect(session.holdsSensitiveState, isFalse);
+
+    await session.beginRecovery(fixtureRecovery.answers);
+    expect(session.data, isNull);
+    expect(
+      session.holdsSensitiveState,
+      isTrue,
+      reason: 'the verified recovery key is live state',
+    );
+
+    await session.lock();
+    expect(session.holdsSensitiveState, isFalse);
+    expect(session.phase, SessionPhase.locked);
+  });
+
+  test('a reload during in-flight setup is refused', () async {
+    await session.load();
+    native.holdAt = CommitStage.fileSync;
+    final setup = session.setup(localPassword, fixtureRecovery);
+    await native.entered.future;
+
+    await expectLater(session.load(), _rejectedAs(FailureCode.busy));
+    expect(session.isBusy, isTrue);
+
+    native.release();
+    await setup;
+    expect(session.phase, SessionPhase.unlocked);
+  });
+
+  test('a reload on a live session is refused and stays lockable', () async {
+    await unlockSeeded();
+    await File('${dir.path}/vault.enc').writeAsString('corrupt');
+
+    await expectLater(session.load(), _rejectedAs(FailureCode.busy));
+    expect(session.phase, SessionPhase.unlocked);
+    expect(session.data!.notes.single.id, fixtureData.notes.single.id);
+    expect(session.needsReload, isFalse);
+
+    await session.lock();
+    expect(session.phase, SessionPhase.locked);
+    expect(session.holdsSensitiveState, isFalse);
+  });
+
+  test('a reload cannot discard a sealed edit waiting for retry', () async {
+    await unlockSeeded();
+    native.failNextCommit = true;
+    await expectLater(
+      session.saveNote(editedNote('pending edit')),
+      throwsA(isA<VaultException>()),
+    );
+    expect(session.phase, SessionPhase.storageError);
+
+    await expectLater(session.load(), _rejectedAs(FailureCode.busy));
+    expect(session.phase, SessionPhase.storageError);
+
+    await session.retrySave();
+    expect(session.data!.notes.single.markdown, 'pending edit');
+  });
 
   test('a lock during load of a fresh install still reaches setup', () async {
     holdNextRead();

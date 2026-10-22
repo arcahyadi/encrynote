@@ -53,7 +53,6 @@ class NoteSession extends ChangeNotifier {
   int _sealedAt = 0;
   bool _failed = false;
   bool _uncertain = false;
-  bool _reload = false;
   int _epoch = 0;
   int _busy = 0;
   bool _disposed = false;
@@ -79,7 +78,20 @@ class NoteSession extends ChangeNotifier {
 
   /// A load failure means there is no open vault to retry writing, so the UI
   /// must call [load] again; [retrySave] cannot recover from it.
-  bool get needsReload => _reload;
+  bool get needsReload =>
+      _phase == SessionPhase.storageError && !holdsSensitiveState;
+
+  /// Whether the session still retains a data key or plaintext note copy.
+  ///
+  /// The privacy lifecycle uses this to tell "nothing left to hide or flush"
+  /// apart from "a lock still owes work"; it is deliberately **not** an
+  /// authorization grant — only [canMutate] and the phase gate decide access.
+  bool get holdsSensitiveState =>
+      _vault != null ||
+      _data != null ||
+      _recovery != null ||
+      _recoveryData != null ||
+      _pendingData != null;
 
   /// A failed write freezes edits, import, export and credential changes until
   /// the sealed snapshot is reconciled with the disk. An in-flight commit does
@@ -91,6 +103,13 @@ class NoteSession extends ChangeNotifier {
       _data != null;
 
   Future<void> load() async {
+    // Reloading is only safe from a clean session. A live vault, a verified
+    // recovery key, a sealed snapshot, or work in flight would either be
+    // silently discarded or keep a key resident behind a screen that no longer
+    // reflects it, so those reloads are refused instead of mutating state.
+    if (_busy > 0 || _pending != null || holdsSensitiveState) {
+      throw const VaultException(FailureCode.busy, 'load');
+    }
     _begin();
     final epoch = _epoch;
     try {
@@ -108,15 +127,21 @@ class NoteSession extends ChangeNotifier {
         _vault = null;
         _recovery = null;
         _recoveryData = null;
+        // The guard above proved no sealed snapshot or accepted edit is live;
+        // clear the bookkeeping too so a reload starts from a clean session.
+        _pending = null;
+        _pendingData = null;
+        _pendingRevision = null;
+        _accepted = 0;
+        _sealedAt = 0;
+        _revision = 0;
         _failure = null;
         _failed = false;
-        _reload = false;
         _notify();
       });
     } on VaultException catch (error) {
       _failure = error.code;
       _phase = SessionPhase.storageError;
-      _reload = true;
       _notify();
       rethrow;
     } finally {
@@ -345,7 +370,7 @@ class NoteSession extends ChangeNotifier {
     }
     // A load failure left no open vault; silently returning would look like a
     // successful retry, so callers must load again instead.
-    if (_reload) {
+    if (needsReload) {
       throw const VaultException(FailureCode.storage, 'load');
     }
     if (_pending == null && !_failed) return;
@@ -378,8 +403,11 @@ class NoteSession extends ChangeNotifier {
   Future<void> lock() {
     if (_phase == SessionPhase.loading) return Future<void>.value();
     // A failed load has no key and no notes to hide; locking would hide the
-    // only way to retry the load.
-    if (_reload) return Future<void>.value();
+    // only way to retry the load. Keyed on state, not on the failure history:
+    // a session that still holds anything must always be lockable.
+    if (_phase == SessionPhase.storageError && !holdsSensitiveState) {
+      return Future<void>.value();
+    }
     if (_phase == SessionPhase.needsSetup) {
       if (_busy == 0) return Future<void>.value();
       _epoch++;
@@ -411,6 +439,8 @@ class NoteSession extends ChangeNotifier {
         _recovery = null;
         _recoveryData = null;
         _data = null;
+        // Only the sealed ciphertext may wait for a retry after lock.
+        _pendingData = null;
         _notify();
       }
     });
@@ -546,7 +576,9 @@ class NoteSession extends ChangeNotifier {
     if (pending == null) return;
     final epoch = _epoch;
     final revision = _pendingRevision!;
-    final data = _pendingData!;
+    // Null after a lock: the plaintext copy is gone and only the ciphertext
+    // waits. The key is gone too, so there is no vault to rebuild.
+    final data = _pendingData;
     final vault = _vault;
     try {
       await _store.commit(pending);
@@ -557,7 +589,7 @@ class NoteSession extends ChangeNotifier {
       _failed = false;
       _uncertain = false;
       _failure = null;
-      if (vault != null) {
+      if (vault != null && data != null) {
         _vault = UnlockedVault(
           envelope: pending,
           dataKey: vault.dataKey,
@@ -595,7 +627,7 @@ class NoteSession extends ChangeNotifier {
     final disk = await _store.read();
     if (disk != null && listEquals(disk, pending)) {
       _revision = _pendingRevision!;
-      final data = _pendingData!;
+      final data = _pendingData;
       final vault = _vault;
       _pending = null;
       _pendingData = null;
@@ -603,7 +635,7 @@ class NoteSession extends ChangeNotifier {
       _failed = false;
       _uncertain = false;
       _failure = null;
-      if (vault != null) {
+      if (vault != null && data != null) {
         _vault = UnlockedVault(
           envelope: pending,
           dataKey: vault.dataKey,
@@ -612,7 +644,9 @@ class NoteSession extends ChangeNotifier {
         );
       }
       _completeWaiters(_sealedAt);
-      if (_phase == SessionPhase.storageError) {
+      // Only a session that still holds the key may present itself as open;
+      // after a lock this reconcile just settles the ciphertext.
+      if (_phase == SessionPhase.storageError && _vault != null) {
         _phase = SessionPhase.unlocked;
       }
       _notify();
@@ -637,7 +671,6 @@ class NoteSession extends ChangeNotifier {
       _sealedAt = 0;
       _failed = false;
       _uncertain = false;
-      _reload = false;
       _phase = SessionPhase.locked;
       _notify();
       return;
@@ -655,7 +688,6 @@ class NoteSession extends ChangeNotifier {
     _sealedAt = 0;
     _failed = false;
     _uncertain = false;
-    _reload = false;
     _failure = null;
     _phase = SessionPhase.unlocked;
     _notify();

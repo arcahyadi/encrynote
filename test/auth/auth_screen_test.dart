@@ -169,6 +169,7 @@ void main() {
 
     expect(find.text('Use at least 8 characters.'), findsOneWidget);
     expect(session.phase, SessionPhase.needsSetup);
+    expect(session.holdsSensitiveState, isFalse);
     expect(
       await io(tester, () => File('${dir.path}/vault.enc').exists()),
       isFalse,
@@ -274,7 +275,38 @@ void main() {
     );
     expect(find.text('Unlock EnCryNote'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    expect(
+      session.holdsSensitiveState,
+      isFalse,
+      reason: 'the locked screen keeps no key or plaintext',
+    );
     expect(find.text('Your vault is unlocked'), findsNothing);
+  });
+
+  testWidgets('a lock during setup drops the live password fields', (
+    tester,
+  ) async {
+    useTallViewport(tester);
+    await load(tester);
+    await pumpApp(tester);
+    await fillSetup(tester);
+
+    // A real lock can arrive while the setup commit is in flight.
+    native.holdAt = CommitStage.fileSync;
+    await io(tester, () async {
+      final setup = session.setup('password-1', fixtureRecovery);
+      await native.entered.future;
+      await session.lock();
+      native.release();
+      await setup;
+    });
+    await tester.pumpAndSettle();
+
+    expect(session.phase, SessionPhase.locked);
+    expect(session.holdsSensitiveState, isFalse);
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('passwordInput')), findsNothing);
+    expect(find.text('Unlock EnCryNote'), findsOneWidget);
   });
 
   testWidgets('recovery can be cancelled back to unlock', (tester) async {
