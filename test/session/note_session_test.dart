@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -12,6 +13,27 @@ import '../support/fixtures.dart';
 
 Matcher _rejectedAs(FailureCode code) =>
     throwsA(isA<VaultException>().having((e) => e.code, 'code', code));
+
+/// Test-only seal gate: holds the expensive seal so a second edit can land
+/// between the payload capture and the sealed bytes.
+class _GatedCrypto extends VaultCrypto {
+  Completer<void>? gate;
+  final Completer<void> entered = Completer<void>();
+
+  @override
+  Future<Uint8List> seal(
+    UnlockedVault vault,
+    VaultData data,
+    int revision,
+  ) async {
+    final open = gate;
+    if (open != null) {
+      if (!entered.isCompleted) entered.complete();
+      await open.future;
+    }
+    return super.seal(vault, data, revision);
+  }
+}
 
 /// Session tests keep scratch files inside the project and only delete the
 /// directory this test created. The encrypted seed is created once.
@@ -435,5 +457,115 @@ void main() {
       throwsA(isA<VaultException>()),
     );
     expect(() => session.readNotesForExport(), throwsA(isA<VaultException>()));
+  });
+
+  test('an edit accepted during the seal is neither acknowledged early nor '
+      'dropped', () async {
+    final gated = _GatedCrypto();
+    final gatedSession = NoteSession(crypto: gated, store: store);
+    addTearDown(gatedSession.dispose);
+    await seedVault();
+    await gatedSession.load();
+    await gatedSession.unlock(localPassword);
+
+    gated.gate = Completer<void>();
+    final first = gatedSession.saveNote(
+      gatedSession.data!.notes.single.copyWith(markdown: 'first'),
+    );
+    await gated.entered.future;
+
+    // This edit lands after the payload was captured but before the seal
+    // returned, so the sealed bytes cannot cover it.
+    final second = gatedSession.saveNote(
+      gatedSession.data!.notes.single.copyWith(markdown: 'second'),
+    );
+    gated.gate!.complete();
+    await Future.wait<void>([first, second]);
+
+    final onDisk = await crypto.unlock((await store.read())!, localPassword);
+    expect(
+      onDisk.data.notes.single.markdown,
+      'second',
+      reason: 'both completed futures must be inside the committed snapshot',
+    );
+
+    await gatedSession.lock();
+    await gatedSession.unlock(localPassword);
+    expect(gatedSession.data!.notes.single.markdown, 'second');
+  });
+
+  test('a draft that would exceed the envelope limit is rejected before '
+      'acceptance', () async {
+    // Recovery question text is user-chosen and unbounded, so a large header is
+    // creatable. That header leaves less room for the payload in the envelope.
+    final bigQuestions = RecoveryConfig(
+      questions: [for (var i = 0; i < 3; i++) 'Q$i${'q' * 1900000}'],
+      answers: fixtureRecovery.answers,
+    );
+    final bigVault = await crypto.createVault(
+      localPassword,
+      bigQuestions,
+      fixtureData,
+    );
+    await File('${dir.path}/vault.enc')
+        .writeAsBytes(bigVault.envelope, flush: true);
+    await session.load();
+    await session.unlock(localPassword);
+
+    // Payload-legal (below maxPayloadBytes) but the base64 payload plus this
+    // header no longer fits maxEnvelopeBytes.
+    final tooBigForEnvelope = editedNote('a' * (maxPayloadBytes - 4096));
+    await expectLater(
+      session.saveNote(tooBigForEnvelope),
+      throwsA(
+        isA<VaultException>()
+            .having((e) => e.code, 'code', FailureCode.limit)
+            .having((e) => e.detail, 'detail', 'envelope'),
+      ),
+    );
+
+    expect(session.phase, SessionPhase.unlocked);
+    expect(session.canMutate, isTrue);
+    expect(session.failure, isNull);
+    expect(
+      session.data!.notes.single.markdown,
+      fixtureData.notes.single.markdown,
+    );
+    expect(native.commitCount, 0);
+
+    // The session still works and the questions were never restricted.
+    await session.saveNote(editedNote('still editable'));
+    expect(session.data!.notes.single.markdown, 'still editable');
+  });
+
+  test('lock during an in-flight setup invalidates the late unlocked '
+      'adoption', () async {
+    await session.load();
+    native.holdAt = CommitStage.fileSync;
+    final setup = session.setup(localPassword, fixtureRecovery);
+    await native.entered.future;
+
+    await session.lock();
+    expect(session.phase, SessionPhase.locked);
+    expect(session.data, isNull);
+
+    native.release();
+    await setup;
+
+    expect(
+      session.phase,
+      SessionPhase.locked,
+      reason: 'a lock during setup must not end with an unlocked vault',
+    );
+    expect(session.data, isNull);
+    expect(
+      session.recoveryQuestions,
+      fixtureRecovery.questions,
+      reason: 'the committed vault is on disk, so recovery stays reachable',
+    );
+
+    await session.unlock(localPassword);
+    expect(session.phase, SessionPhase.unlocked);
+    expect(session.data!.notes, isEmpty);
   });
 }

@@ -517,6 +517,80 @@ void main() {
     expect(reopened.data.notes.single.markdown.length, 1024 * 1024);
   });
 
+  test('snapshot pre-check matches the envelope the writer emits', () async {
+    // A large user-chosen question header leaves little envelope room, so the
+    // payload limit alone is not the binding constraint.
+    final questions = RecoveryConfig(
+      questions: [for (var i = 0; i < 3; i++) 'Q$i${'q' * 1900000}'],
+      answers: fixtureRecovery.answers,
+    );
+    final created = await crypto.createVault(
+      localPassword,
+      questions,
+      VaultData(notes: const []),
+    );
+    final unlocked = await crypto.unlock(created.envelope, localPassword);
+
+    Note sized(int length) => Note(
+      id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      title: 'sized',
+      markdown: 'a' * length,
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+    );
+
+    bool fits(int length) {
+      try {
+        crypto.checkSnapshotFits(
+          unlocked,
+          VaultData(notes: [sized(length)]),
+          2,
+        );
+        return true;
+      } on VaultException catch (error) {
+        expect(error.code, FailureCode.limit);
+        expect(error.detail, 'envelope');
+        return false;
+      }
+    }
+
+    // Search a narrow band around the estimate instead of the whole 8 MiB.
+    final budget = maxEnvelopeBytes - created.envelope.length;
+    final estimate = (budget * 3) ~/ 4 - 1024;
+    var lo = estimate - 65536;
+    var hi = estimate + 65536;
+    while (lo + 1 < hi) {
+      final mid = (lo + hi) ~/ 2;
+      if (fits(mid)) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+
+    expect(fits(lo), isTrue);
+    expect(fits(hi), isFalse);
+    final sealed = await crypto.seal(
+      unlocked,
+      VaultData(notes: [sized(lo)]),
+      2,
+    );
+    expect(sealed.length, lessThanOrEqualTo(maxEnvelopeBytes));
+    expect(
+      maxEnvelopeBytes - sealed.length,
+      lessThan(1024),
+      reason: 'the pre-check must not leave a large unused margin',
+    );
+    await expectLater(
+      crypto.seal(unlocked, VaultData(notes: [sized(hi)]), 2),
+      throwsA(
+        isA<VaultException>()
+            .having((e) => e.code, 'code', FailureCode.limit)
+            .having((e) => e.detail, 'detail', 'envelope'),
+      ),
+    );
+  });
+
   test('damaged password block also blocks the recovery path', () async {
     final created = await crypto.createVault(
       localPassword,

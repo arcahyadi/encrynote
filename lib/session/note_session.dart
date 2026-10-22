@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -135,8 +134,10 @@ class NoteSession extends ChangeNotifier {
           VaultData(notes: const []),
         );
         await _store.commit(created.envelope);
-        if (epoch != _epoch) return;
+        // The vault is on disk now, so its questions are readable even if a
+        // lock during setup rejects the unlocked adoption below.
         _questions = recovery.questions;
+        if (epoch != _epoch) return;
         _adopt(created, epoch);
       });
     } on VaultException catch (error) {
@@ -356,8 +357,18 @@ class NoteSession extends ChangeNotifier {
 
   /// Hides every note immediately, then seals and writes the last accepted edit
   /// before the key is dropped.
+  ///
+  /// A lock during `setup`/`load` still invalidates the pending adoption: the
+  /// vault may already be on disk, so the user unlocks instead of being handed
+  /// an unlocked session they left.
   Future<void> lock() {
     if (_phase == SessionPhase.needsSetup || _phase == SessionPhase.loading) {
+      if (_busy == 0) return Future<void>.value();
+      _epoch++;
+      _phase = SessionPhase.locked;
+      _debounce?.cancel();
+      _debounce = null;
+      _notify();
       return Future<void>.value();
     }
     _epoch++;
@@ -431,7 +442,10 @@ class NoteSession extends ChangeNotifier {
   Future<void> _accept(VaultData next, {bool immediate = false}) {
     _requireMutable();
     final revision = _revision + 1;
-    _checkPayload(next, revision);
+    final vault = _vault!;
+    // Reject before the draft enters state, so a rejected edit leaves the last
+    // accepted value in place and never reaches the writer.
+    _crypto.checkSnapshotFits(vault, next, revision);
     _data = next;
     _accepted++;
     final waiter = _Waiter(_accepted);
@@ -477,6 +491,9 @@ class NoteSession extends ChangeNotifier {
           continue;
         }
         if (!behind) return;
+        // Capture the watermark before the seal awaits: an edit accepted during
+        // the seal is not covered by these bytes, so it must stay behind.
+        final sealedUpTo = _accepted;
         final revision = _revision + 1;
         final Uint8List sealed;
         try {
@@ -491,7 +508,7 @@ class NoteSession extends ChangeNotifier {
         _pending = sealed;
         _pendingData = data;
         _pendingRevision = revision;
-        _sealedAt = _accepted;
+        _sealedAt = sealedUpTo;
         await _commitPending();
         if (_pending != null) return;
       }
@@ -622,17 +639,6 @@ class NoteSession extends ChangeNotifier {
     _failure = null;
     _phase = SessionPhase.unlocked;
     _notify();
-  }
-
-  /// Mirrors the sealed-payload limit so a rejected draft never enters session
-  /// state; [VaultCrypto.seal] re-checks the same bytes before writing.
-  void _checkPayload(VaultData data, int revision) {
-    final bytes = utf8.encode(
-      jsonEncode(<String, dynamic>{'revision': revision, ...data.toJson()}),
-    );
-    if (bytes.length > maxPayloadBytes) {
-      throw const VaultException(FailureCode.limit, 'payload');
-    }
   }
 
   void _requireMutable() {

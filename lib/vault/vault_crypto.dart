@@ -117,6 +117,46 @@ class VaultCrypto {
     );
   }
 
+  /// Rejects [data] at [revision] when the sealed payload or the resulting
+  /// envelope would exceed the v1 limits. Runs no crypto and writes nothing, so
+  /// a caller can reject a draft before accepting it into session state.
+  ///
+  /// The envelope length is measured against [vault]'s own header and wrappers,
+  /// which are the ones [seal] re-emits unchanged.
+  void checkSnapshotFits(UnlockedVault vault, VaultData data, int revision) {
+    final plain = v1PayloadBytes(data, revision);
+    if (_envelopeLengthFor(vault.envelope, plain.length) > maxEnvelopeBytes) {
+      throw const VaultException(FailureCode.limit, 'envelope');
+    }
+  }
+
+  /// Exact byte length of the envelope [seal] would emit for a payload of
+  /// [plainLength] bytes, using the retained envelope's own JSON framing.
+  ///
+  /// AES-GCM ciphertext is the plaintext length and base64 is 4 chars per
+  /// 3 bytes, so only the base64 field lengths differ from the current file.
+  int _envelopeLengthFor(Uint8List envelope, int plainLength) {
+    final Map<String, dynamic> map;
+    try {
+      map = jsonDecode(utf8.decode(envelope)) as Map<String, dynamic>;
+    } on Object {
+      throw const VaultException(FailureCode.format, 'envelope');
+    }
+    final current = map['payload'];
+    if (current is! Map<String, dynamic>) {
+      throw const VaultException(FailureCode.format, 'payload');
+    }
+    final cipherBase64 = 4 * ((plainLength + 2) ~/ 3);
+    final next = <String, dynamic>{
+      'nonce': 'A' * (4 * ((_nonceLength + 2) ~/ 3)),
+      'ciphertext': 'A' * cipherBase64,
+      'tag': 'A' * (4 * ((_tagLength + 2) ~/ 3)),
+    };
+    final before = utf8.encode(jsonEncode(current)).length;
+    final after = utf8.encode(jsonEncode(next)).length;
+    return utf8.encode(jsonEncode(map)).length - before + after;
+  }
+
   Future<Uint8List> rewrapPassword(
     UnlockedVault vault,
     String newPassword,
@@ -179,6 +219,26 @@ class VaultCrypto {
     }
     return bytes;
   }
+}
+
+/// Serialized v1 payload plaintext for [data] at [revision].
+///
+/// Single source of truth for the bytes [seal] encrypts and for the pre-accept
+/// limit checks, so a check can never describe a different snapshot than the
+/// writer produces.
+Uint8List v1PayloadBytes(VaultData data, int revision) {
+  if (revision < 1) {
+    throw const VaultException(FailureCode.format, 'revision');
+  }
+  final plain = Uint8List.fromList(
+    utf8.encode(
+      jsonEncode(<String, dynamic>{'revision': revision, ...data.toJson()}),
+    ),
+  );
+  if (plain.length > maxPayloadBytes) {
+    throw const VaultException(FailureCode.limit, 'payload');
+  }
+  return plain;
 }
 
 typedef _Opened = ({Uint8List dataKey, Map<String, dynamic> json});
@@ -337,17 +397,7 @@ Future<_Sealed> _sealPayload(
   int revision,
   Uint8List nonce,
 ) async {
-  if (revision < 1) {
-    throw const VaultException(FailureCode.format, 'revision');
-  }
-  final plain = Uint8List.fromList(
-    utf8.encode(
-      jsonEncode(<String, dynamic>{'revision': revision, ...data.toJson()}),
-    ),
-  );
-  if (plain.length > maxPayloadBytes) {
-    throw const VaultException(FailureCode.limit, 'payload');
-  }
+  final plain = v1PayloadBytes(data, revision);
   final box = await AesGcm.with256bits().encrypt(
     plain,
     secretKey: SecretKeyData(dataKeyBytes),
