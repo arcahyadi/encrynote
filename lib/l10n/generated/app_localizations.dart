@@ -334,23 +334,125 @@ abstract class AppLocalizations {
   /// **'That did not work. Nothing was changed; try again.'**
   String get retryFailed;
 
-  /// No description provided for @unlockedTitle.
+  /// No description provided for @notesTitle.
   ///
   /// In en, this message translates to:
-  /// **'Your vault is unlocked'**
-  String get unlockedTitle;
-
-  /// No description provided for @unlockedBody.
-  ///
-  /// In en, this message translates to:
-  /// **'Your notes will appear here.'**
-  String get unlockedBody;
+  /// **'Notes'**
+  String get notesTitle;
 
   /// No description provided for @lockNowButton.
   ///
   /// In en, this message translates to:
   /// **'Lock now'**
   String get lockNowButton;
+
+  /// No description provided for @newNoteButton.
+  ///
+  /// In en, this message translates to:
+  /// **'New note'**
+  String get newNoteButton;
+
+  /// No description provided for @untitledNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled note'**
+  String get untitledNote;
+
+  /// No description provided for @selectNoteHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a note to read or edit it.'**
+  String get selectNoteHint;
+
+  /// No description provided for @noNotesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No notes yet'**
+  String get noNotesTitle;
+
+  /// No description provided for @noNotesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Create your first note with New note.'**
+  String get noNotesBody;
+
+  /// No description provided for @noteTitleLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get noteTitleLabel;
+
+  /// No description provided for @writeTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Write'**
+  String get writeTab;
+
+  /// No description provided for @previewTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get previewTab;
+
+  /// No description provided for @savedLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get savedLabel;
+
+  /// No description provided for @noteTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'This note is too large to save.'**
+  String get noteTooLarge;
+
+  /// No description provided for @noteSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'This note could not be saved. Try again.'**
+  String get noteSaveFailed;
+
+  /// No description provided for @imageUnavailableOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Image not available offline.'**
+  String get imageUnavailableOffline;
+
+  /// No description provided for @deleteNoteButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get deleteNoteButton;
+
+  /// No description provided for @deleteNoteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete note?'**
+  String get deleteNoteTitle;
+
+  /// No description provided for @deleteNoteBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete \"{title}\"? This cannot be undone.'**
+  String deleteNoteBody(String title);
+
+  /// No description provided for @deleteNoteBodyUntitled.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this untitled note? This cannot be undone.'**
+  String get deleteNoteBodyUntitled;
+
+  /// No description provided for @cancelButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get cancelButton;
+
+  /// No description provided for @backToNotesTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to notes'**
+  String get backToNotesTooltip;
 
   /// No description provided for @settingsTitle.
   ///

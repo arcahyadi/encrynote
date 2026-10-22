@@ -370,6 +370,23 @@ class NoteSession extends ChangeNotifier {
     );
   }
 
+  /// Writes the newest accepted edit now instead of waiting for the debounce.
+  ///
+  /// A screen switch flushes through here so the last keystroke is sealed
+  /// before the controllers that produced it are disposed. A failure is
+  /// recorded by the normal write path and freezes the session; it is not
+  /// reported as success.
+  Future<void> flushSave() async {
+    if (_phase != SessionPhase.unlocked) return;
+    if (_debounce == null && _sealedAt >= _accepted) return;
+    _debounce?.cancel();
+    _debounce = null;
+    await _enqueue(_flush);
+  }
+
+  /// A fresh 16-byte local note id in hex.
+  String newNoteId() => _newId();
+
   Future<void> setAutoLock(AutoLockMode mode) async {
     _requireMutable();
     await _accept(_data!.copyWith(autoLock: mode));

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../l10n/generated/app_localizations.dart';
 import '../lock/privacy_signals.dart';
+import '../notes/notes_screen.dart';
 import '../session/note_session.dart';
-import '../settings/settings_screen.dart';
 import '../vault/vault_types.dart';
 
 /// Setup, unlock and recovery, driven entirely by [NoteSession.phase].
@@ -149,35 +149,42 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return Scaffold(
-      body: SafeArea(
-        child: ListenableBuilder(
-          listenable: widget.session,
-          builder: (context, _) => Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Semantics(
-                      header: true,
-                      child: Text(
-                        l10n.appTitle,
-                        style: Theme.of(context).textTheme.headlineMedium,
-                        textAlign: TextAlign.center,
+    return ListenableBuilder(
+      listenable: widget.session,
+      builder: (context, _) {
+        // The notes surface owns the whole window: its own Scaffold, its own
+        // list/editor layout, and no auth padding or width cap.
+        if (widget.session.phase == SessionPhase.unlocked) {
+          return NotesScreen(session: widget.session);
+        }
+        return Scaffold(
+          body: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          l10n.appTitle,
+                          style: Theme.of(context).textTheme.headlineMedium,
+                          textAlign: TextAlign.center,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    _body(l10n),
-                  ],
+                      const SizedBox(height: 24),
+                      _body(l10n),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -200,7 +207,9 @@ class _AuthScreenState extends State<AuthScreen> {
       case SessionPhase.storageError:
         return _storageError(l10n);
       case SessionPhase.unlocked:
-        return _unlocked(l10n);
+        // Reached only by a direct AuthScreen pump; build hands the whole
+        // window to the notes surface before this switch runs.
+        return NotesScreen(session: widget.session);
     }
   }
 
@@ -546,7 +555,7 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  // --- errors and unlocked placeholder ------------------------------------
+  // --- errors -------------------------------------------------------------
 
   Widget _storageError(AppLocalizations l10n) {
     // A load failure has no open vault to retry writing; a save failure does.
@@ -585,30 +594,6 @@ class _AuthScreenState extends State<AuthScreen> {
               _fail(l10n.retryFailed);
             }
           },
-        ),
-      ],
-    );
-  }
-
-  Widget _unlocked(AppLocalizations l10n) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _heading(l10n.unlockedTitle),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Text(l10n.unlockedBody, textAlign: TextAlign.center),
-        ),
-        _action(
-          key: const ValueKey('lockNowButton'),
-          label: l10n.lockNowButton,
-          onPressed: () => widget.session.lock(),
-        ),
-        TextButton(
-          key: const ValueKey('settingsButton'),
-          onPressed: () =>
-              Navigator.of(context).pushNamed(SettingsScreen.routeName),
-          child: Text(l10n.settingsButton),
         ),
       ],
     );

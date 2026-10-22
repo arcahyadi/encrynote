@@ -264,7 +264,7 @@ void main() {
     await fillSetup(tester);
     await createVault(tester);
 
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
     expect(tester.takeException(), isNull);
     expect(find.text('password-1'), findsNothing);
     expect(find.byKey(const ValueKey('passwordInput')), findsNothing);
@@ -281,7 +281,7 @@ void main() {
       isFalse,
       reason: 'the locked screen keeps no key or plaintext',
     );
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
   });
 
   testWidgets('a lock during setup drops the live password fields', (
@@ -481,7 +481,7 @@ void main() {
     await act(tester, () async {
       await tester.testTextInput.receiveAction(TextInputAction.done);
     }, done: () => session.phase == SessionPhase.unlocked);
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
 
     await act(
       tester,
@@ -495,7 +495,7 @@ void main() {
     await act(tester, () async {
       await tester.testTextInput.receiveAction(TextInputAction.done);
     }, done: () => session.phase == SessionPhase.unlocked);
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
   });
 
   testWidgets('a wrong password is rejected and offers no setup form', (
@@ -512,11 +512,11 @@ void main() {
     expect(find.text('That password is incorrect.'), findsOneWidget);
     expect(session.phase, SessionPhase.locked);
     expect(find.text('Create your password'), findsNothing);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
 
     await unlockWith(tester, localPassword);
     expect(session.phase, SessionPhase.unlocked);
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
   });
 
   testWidgets('recovery sets a new password without showing notes', (
@@ -561,7 +561,7 @@ void main() {
     );
 
     expect(find.text('Create a new password'), findsOneWidget);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
     expect(find.textContaining('Fixture Markdown Body'), findsNothing);
 
     await enter(tester, 'newPasswordInput', newPassword);
@@ -571,7 +571,7 @@ void main() {
       () => tapKey(tester, 'setPasswordButton'),
       done: () => session.phase == SessionPhase.unlocked,
     );
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
 
     // The old password no longer opens the vault; the new one does.
     await act(
@@ -611,7 +611,7 @@ void main() {
     // Password and confirmation both keep their text after the failure.
     expect(find.text('password-1'), findsNWidgets(2));
     expect(find.text('Blue House'), findsOneWidget);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
 
     await createVault(tester);
     expect(session.phase, SessionPhase.unlocked);
@@ -641,7 +641,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Create your password'), findsNothing);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
 
     await seedVault(tester);
     await act(
@@ -680,7 +680,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Create your password'), findsNothing);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
   });
 
   testWidgets('a failed save offers a save retry, not a reload', (
@@ -706,7 +706,7 @@ void main() {
 
     expect(session.phase, SessionPhase.storageError);
     expect(find.text('Your last change is not saved yet'), findsOneWidget);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
     expect(find.textContaining('edited body'), findsNothing);
 
     await act(
@@ -714,7 +714,7 @@ void main() {
       () => tapKey(tester, 'retryButton'),
       done: () => session.phase == SessionPhase.unlocked,
     );
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
     expect(session.data!.notes.single.markdown, 'edited body');
   });
 

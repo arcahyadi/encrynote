@@ -54,9 +54,33 @@
   "saveErrorTitle": "Your last change is not saved yet",
   "saveErrorBody": "EnCryNote is keeping the change and will not accept new edits until it is saved. Retry the save now.",
   "retryFailed": "That did not work. Nothing was changed; try again.",
-  "unlockedTitle": "Your vault is unlocked",
-  "unlockedBody": "Your notes will appear here.",
+  "notesTitle": "Notes",
   "lockNowButton": "Lock now",
+  "newNoteButton": "New note",
+  "untitledNote": "Untitled note",
+  "selectNoteHint": "Select a note to read or edit it.",
+  "noNotesTitle": "No notes yet",
+  "noNotesBody": "Create your first note with New note.",
+  "noteTitleLabel": "Title",
+  "writeTab": "Write",
+  "previewTab": "Preview",
+  "savedLabel": "Saved",
+  "noteTooLarge": "This note is too large to save.",
+  "noteSaveFailed": "This note could not be saved. Try again.",
+  "imageUnavailableOffline": "Image not available offline.",
+  "deleteNoteButton": "Delete",
+  "deleteNoteTitle": "Delete note?",
+  "deleteNoteBody": "Delete \"{title}\"? This cannot be undone.",
+  "@deleteNoteBody": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteNoteBodyUntitled": "Delete this untitled note? This cannot be undone.",
+  "cancelButton": "Cancel",
+  "backToNotesTooltip": "Back to notes",
   "settingsTitle": "Settings",
   "settingsButton": "Settings",
   "autoLockTitle": "Auto-lock",

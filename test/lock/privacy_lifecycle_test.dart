@@ -175,12 +175,12 @@ void main() {
       await unlock(tester);
       await io(tester, () => session.setAutoLock(AutoLockMode.immediately));
       await pumpApp(tester);
-      expect(find.text('Your vault is unlocked'), findsOneWidget);
+      expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
 
       await blur(tester);
       expect(native.shieldVisible, isTrue);
       expect(session.phase, SessionPhase.locked);
-      expect(find.text('Your vault is unlocked'), findsNothing);
+      expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
 
       await refocus(tester);
       expect(native.shieldVisible, isFalse);
@@ -189,7 +189,7 @@ void main() {
         'shield:true',
         'shield:false',
       ], reason: 'the shield is installed and only removed after the lock');
-      expect(find.text('Your vault is unlocked'), findsNothing);
+      expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
     },
   );
 
@@ -248,7 +248,7 @@ void main() {
     await refocus(tester);
     expect(native.shieldVisible, isFalse);
     expect(session.phase, SessionPhase.unlocked);
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
   });
 
   testWidgets('the Flutter lifecycle alone shields and locks', (tester) async {
@@ -565,7 +565,7 @@ void main() {
 
     expect(native.shieldVisible, isFalse);
     expect(session.phase, SessionPhase.unlocked);
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
   });
 
   testWidgets('a native shield failure hides the notes by locking', (
@@ -609,7 +609,7 @@ void main() {
 
     expect(native.shieldVisible, isFalse);
     expect(session.phase, SessionPhase.unlocked);
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
   });
 
   testWidgets('an unlock finishing while away locks again at once', (
@@ -629,7 +629,7 @@ void main() {
     expect(session.phase, SessionPhase.locked);
     expect(session.data, isNull);
     expect(native.shieldVisible, isTrue);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
   });
 
   testWidgets('a resume during an in-flight Immediately lock shows no notes', (
@@ -646,7 +646,7 @@ void main() {
 
     expect(session.phase, SessionPhase.locked);
     expect(native.shieldVisible, isFalse);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
     expect(find.textContaining('Fixture Markdown Body'), findsNothing);
     expect(find.text('Unlock EnCryNote'), findsOneWidget);
   });
@@ -663,7 +663,7 @@ void main() {
 
     expect(native.shieldVisible, isTrue);
     expect(session.phase, SessionPhase.locked);
-    expect(find.text('Your vault is unlocked'), findsNothing);
+    expect(find.byKey(const ValueKey('notesScreen')), findsNothing);
 
     await refocus(tester);
     expect(native.shieldVisible, isFalse);
@@ -737,7 +737,7 @@ void main() {
 
     expect(native.shieldVisible, isFalse);
     expect(session.phase, SessionPhase.unlocked);
-    expect(find.text('Your vault is unlocked'), findsOneWidget);
+    expect(find.byKey(const ValueKey('notesScreen')), findsOneWidget);
   });
 
   testWidgets('a framework frame alone never uncovers the window', (
@@ -853,7 +853,7 @@ void main() {
     await io(tester, () => session.setAutoLock(AutoLockMode.immediately));
     await pumpApp(tester);
 
-    await tester.tap(find.text('Your vault is unlocked'));
+    await tester.tap(find.text('Notes'));
     await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
     await tester.pump();
 

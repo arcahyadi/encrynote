@@ -216,6 +216,43 @@ void main() {
     expect(session.canMutate, isFalse);
   });
 
+  test('flushSave writes the last accepted edit before the debounce', () async {
+    await unlockSeeded();
+    final save = session.saveNote(editedNote('last keystroke'));
+
+    expect(native.commitCount, 0);
+    await session.flushSave();
+    await save;
+
+    expect(native.commitCount, 1);
+    expect(session.data!.notes.single.markdown, 'last keystroke');
+    expect(session.phase, SessionPhase.unlocked);
+
+    // Nothing accepted is waiting, so a second flush writes nothing.
+    await session.flushSave();
+    expect(native.commitCount, 1);
+  });
+
+  test('flushSave is a no-op once the session is locked', () async {
+    await unlockSeeded();
+    final save = session.saveNote(editedNote('locked flush'));
+    await session.lock();
+    await save;
+
+    final commits = native.commitCount;
+    await session.flushSave();
+    expect(native.commitCount, commits);
+    expect(session.data, isNull);
+  });
+
+  test('newNoteId returns a fresh 32-character hex id', () {
+    final first = session.newNoteId();
+    final second = session.newNoteId();
+    expect(first, matches(RegExp(r'^[0-9a-f]{32}$')));
+    expect(second, matches(RegExp(r'^[0-9a-f]{32}$')));
+    expect(first, isNot(second));
+  });
+
   test('debounced autosave coalesces edits into one commit', () async {
     await unlockSeeded();
     final first = session.saveNote(editedNote('first edit'));

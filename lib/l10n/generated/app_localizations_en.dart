@@ -143,13 +143,67 @@ class AppLocalizationsEn extends AppLocalizations {
       'That did not work. Nothing was changed; try again.';
 
   @override
-  String get unlockedTitle => 'Your vault is unlocked';
-
-  @override
-  String get unlockedBody => 'Your notes will appear here.';
+  String get notesTitle => 'Notes';
 
   @override
   String get lockNowButton => 'Lock now';
+
+  @override
+  String get newNoteButton => 'New note';
+
+  @override
+  String get untitledNote => 'Untitled note';
+
+  @override
+  String get selectNoteHint => 'Select a note to read or edit it.';
+
+  @override
+  String get noNotesTitle => 'No notes yet';
+
+  @override
+  String get noNotesBody => 'Create your first note with New note.';
+
+  @override
+  String get noteTitleLabel => 'Title';
+
+  @override
+  String get writeTab => 'Write';
+
+  @override
+  String get previewTab => 'Preview';
+
+  @override
+  String get savedLabel => 'Saved';
+
+  @override
+  String get noteTooLarge => 'This note is too large to save.';
+
+  @override
+  String get noteSaveFailed => 'This note could not be saved. Try again.';
+
+  @override
+  String get imageUnavailableOffline => 'Image not available offline.';
+
+  @override
+  String get deleteNoteButton => 'Delete';
+
+  @override
+  String get deleteNoteTitle => 'Delete note?';
+
+  @override
+  String deleteNoteBody(String title) {
+    return 'Delete \"$title\"? This cannot be undone.';
+  }
+
+  @override
+  String get deleteNoteBodyUntitled =>
+      'Delete this untitled note? This cannot be undone.';
+
+  @override
+  String get cancelButton => 'Cancel';
+
+  @override
+  String get backToNotesTooltip => 'Back to notes';
 
   @override
   String get settingsTitle => 'Settings';

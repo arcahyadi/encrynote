@@ -21,6 +21,42 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   String? _error;
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.session.addListener(_onSessionChanged);
+  }
+
+  @override
+  void didUpdateWidget(SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.session != widget.session) {
+      oldWidget.session.removeListener(_onSessionChanged);
+      widget.session.addListener(_onSessionChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.session.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  /// Settings is opened from the unlocked notes surface; once the vault is no
+  /// longer unlocked it must not sit above the auth screen.
+  void _onSessionChanged() {
+    if (_closing || !mounted || widget.session.phase == SessionPhase.unlocked) {
+      return;
+    }
+    _closing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) navigator.pop();
+    });
+  }
 
   static const List<AutoLockMode> _modes = [
     AutoLockMode.immediately,
