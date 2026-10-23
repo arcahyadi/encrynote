@@ -57,7 +57,7 @@
 - [x] Task 5: Inactivity lock, Settings, dan privacy lifecycle.
 - [x] Task 6: Daftar catatan dan editor Write/Preview yang benar-benar berfungsi.
 - [x] Task 7: Ekspor terenkripsi dan impor Markdown/encrypted export tanpa cache plaintext.
-- [ ] Task 8: Pemeriksaan lintas platform, offline, lisensi, dan panduan kontribusi.
+- [x] Task 8: Pemeriksaan lintas platform, offline, lisensi, dan panduan kontribusi.
 
 ## File map dan kontrak bersama
 
@@ -265,7 +265,7 @@ await expectLater(crypto.recover(bytes, fixtureRecovery.answers), throwsA(isA<Va
 
 **Interfaces:** Tidak menambah API produk. Test integrasi memakai `NoteSession`, `VaultStore`, `VaultCrypto` dan bridge yang sama dengan produk; test native dicatat per device, OS, build mode, aksi dan hasilnya.
 
-- [ ] **Step 1:** Tambahkan test kontrak gagal yang memeriksa ARB English, empat label auto-lock tepat, tidak ada runtime service/permission network pada release, serta backup exclusion vault. Tambahkan integration flow setup -> tulis -> restart locked -> unlock -> recovery -> export -> import ke vault kedua, memakai dependency nyata untuk crypto/disk dan hanya mengganti UI dialog OS pada jalur otomatis.
+- [x] **Step 1:** Tambahkan test kontrak gagal yang memeriksa ARB English, empat label auto-lock tepat, tidak ada runtime service/permission network pada release, serta backup exclusion vault. Tambahkan integration flow setup -> tulis -> restart locked -> unlock -> recovery -> export -> import ke vault kedua, memakai dependency nyata untuk crypto/disk dan hanya mengganti UI dialog OS pada jalur otomatis.
 
 ```dart
 expect([englishArb['autoLockImmediately'], englishArb['autoLockOneMinute'],
@@ -276,9 +276,9 @@ expect(releaseEntitlements.contains('com.apple.security.network.client'), isFals
 ```
 
   `englishArb`, `mainManifest`, dan `releaseEntitlements` dibaca dari file source masing-masing oleh test. Ini memeriksa konfigurasi source, bukan bukti permission artefak yang sudah digabung; pemeriksaan artefak tetap wajib pada Step 4.
-- [ ] **Step 2:** Jalankan `flutter test test/project_contract_test.dart` untuk RED, lalu lengkapi konfigurasi backup dan dokumentasi. Lisensi aplikasi MIT dengan attribution EnCryNote contributors; dokumentasikan lisensi dependency masing-masing tanpa mengubahnya menjadi MIT.
-- [ ] **Step 3:** Dokumentasikan di README: cara menjalankan, cold-start lock, pertanyaan recovery terbaca/risiko jawaban lemah, ekspor tanpa recovery, `.md` asli tetap plaintext, batas ukuran, profil KDF dan batas memori/OS. CONTRIBUTING menjelaskan menambah ARB, placeholder ICU dan tes locale. Jangan mengklaim audit keamanan formal, zeroization sempurna, atau tahan seluruh power loss.
-- [ ] **Step 4:** Jalankan terpisah `flutter gen-l10n`, `dart format --output=none --set-exit-if-changed lib test integration_test`, `flutter analyze`, `flutter test`, `flutter build apk --release`, `flutter build macos --release`, dan `flutter test integration_test/encrynote_flow_test.dart -d <device-id>` untuk kedua platform. Periksa permission artefak Android dengan `apkanalyzer manifest permissions build/app/outputs/flutter-apk/app-release.apk` dan entitlement macOS dengan `codesign -d --entitlements :- build/macos/Build/Products/Release/EnCryNote.app`; release tidak boleh memiliki network permission/entitlement. Keberhasilan build lokal bukan penandatanganan/publikasi store; konfigurasi signing yang belum production harus disebutkan.
+- [x] **Step 2:** Jalankan `flutter test test/project_contract_test.dart` untuk RED, lalu lengkapi konfigurasi backup dan dokumentasi. Lisensi aplikasi MIT dengan attribution EnCryNote contributors; dokumentasikan lisensi dependency masing-masing tanpa mengubahnya menjadi MIT.
+- [x] **Step 3:** Dokumentasikan di README: cara menjalankan, cold-start lock, pertanyaan recovery terbaca/risiko jawaban lemah, ekspor tanpa recovery, `.md` asli tetap plaintext, batas ukuran, profil KDF dan batas memori/OS. CONTRIBUTING menjelaskan menambah ARB, placeholder ICU dan tes locale. Jangan mengklaim audit keamanan formal, zeroization sempurna, atau tahan seluruh power loss.
+- [x] **Step 4:** Jalankan terpisah `flutter gen-l10n`, `dart format --output=none --set-exit-if-changed lib test integration_test`, `flutter analyze`, `flutter test`, `flutter build apk --release`, `flutter build macos --release`, dan `flutter test integration_test/encrynote_flow_test.dart -d <device-id>` untuk kedua platform. Periksa permission artefak Android dengan `apkanalyzer manifest permissions build/app/outputs/flutter-apk/app-release.apk` dan entitlement macOS dengan `codesign -d --entitlements :- build/macos/Build/Products/Release/EnCryNote.app`; release tidak boleh memiliki network permission/entitlement. Keberhasilan build lokal bukan penandatanganan/publikasi store; konfigurasi signing yang belum production harus disebutkan.
 - [ ] **Step 5:** Jalankan checklist native dengan jaringan dimatikan: setup/recovery, dialog file cancel/error, transfer dua arah, semua durasi lock, sleep/resume, inactive snapshot, text scale, keyboard/focus, serta light/dark. Uji pencarian marker plaintext pada data/cache/log fixture. Laporan menyebut Not run beserta alasan untuk perangkat atau pemeriksaan yang tidak tersedia, bukan PASS.
 - [ ] **Step 6:** Sesuai metode eksekusi yang dipilih pengguna, lakukan review akhir atas semua perubahan dan seluruh checklist spec, perbaiki temuan, lalu commit `docs: document offline security and community contributions`. Tidak membuat remote, push, upload release, atau iOS scaffolding.
 
