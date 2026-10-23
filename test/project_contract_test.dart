@@ -192,6 +192,82 @@ void main() {
     });
   });
 
+  group('Android release signing', () {
+    late String gradle;
+    late String androidIgnore;
+
+    setUpAll(() {
+      gradle = source('android/app/build.gradle.kts');
+      androidIgnore = source('android/.gitignore');
+    });
+
+    /// The text from [opener] to its matching closing brace.
+    String block(String text, String opener) {
+      final start = text.indexOf(opener);
+      expect(start, isNonNegative, reason: '$opener must exist');
+      var depth = 0;
+      for (var i = start; i < text.length; i++) {
+        if (text[i] == '{') depth++;
+        if (text[i] == '}') {
+          depth--;
+          if (depth == 0) return text.substring(start, i + 1);
+        }
+      }
+      fail('$opener is not closed');
+    }
+
+    test('the release build type signs with the local release key', () {
+      final release = block(block(gradle, 'buildTypes {'), 'release {');
+      expect(
+        release,
+        contains('signingConfig = signingConfigs.getByName("release")'),
+      );
+      final signingConfigs = block(gradle, 'signingConfigs {');
+      expect(signingConfigs, contains('create("release")'));
+      expect(gradle, contains('rootProject.file("key.properties")'));
+      for (final property in [
+        'storeFile',
+        'storePassword',
+        'keyAlias',
+        'keyPassword',
+      ]) {
+        expect(
+          signingConfigs,
+          contains('getProperty("$property")'),
+          reason: property,
+        );
+      }
+    });
+
+    test('release never falls back to the debug signer', () {
+      final release = block(block(gradle, 'buildTypes {'), 'release {');
+      expect(
+        release,
+        isNot(contains('debug')),
+        reason: 'a release build must not be signed with the debug key',
+      );
+      expect(gradle, isNot(contains('signingConfigs.getByName("debug")')));
+    });
+
+    test('missing signing properties fail release tasks closed', () {
+      // No secrets in a debug build: the guard runs only on release tasks.
+      expect(gradle, contains('GradleException'));
+      expect(gradle, contains('Release signing configuration missing'));
+      expect(
+        RegExp(r'tasks\.matching\s*\{[^}]*contains\("Release"\)')
+            .hasMatch(gradle),
+        isTrue,
+        reason: 'the fail-closed guard must be limited to release tasks',
+      );
+      expect(gradle, contains('doFirst'));
+    });
+
+    test('signing inputs are ignored by git', () {
+      expect(androidIgnore, contains('\nkey.properties'));
+      expect(androidIgnore, contains('**/*.jks'));
+    });
+  });
+
   group('Android backup exclusion', () {
     test('automatic backup is off and extraction rules are referenced', () {
       expect(mainManifest, contains('android:allowBackup="false"'));

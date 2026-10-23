@@ -37,7 +37,8 @@ code is MIT licensed — see [LICENSE](LICENSE) and
 | Web, Windows, Linux | Not implemented |
 
 Android and macOS are the current development targets. Nothing here is a
-production or store release.
+production or store release. The Android development pre-release is version
+`1.0.0-dev.1+1` (Git tag `v1.0.0-dev.1`).
 
 ## Basic usage
 
@@ -84,9 +85,55 @@ destroys it. Use a device or emulator you own or can throw away that has **no
 personal vault** on it, and never a daily-driver install. `--no-uninstall` keeps
 the package (and its data) installed after the run.
 
-The release builds use development signing only (Android debug keystore, macOS
-ad-hoc/local signing). A successful local build is **not** a store-signed or
-published release.
+The release builds use a project-local signing identity: Android is signed with
+a release key kept on the developer's machine (see [Release signing](#release-signing)),
+and macOS uses ad-hoc/local signing. A successful local build is **not** a
+store-signed or published release, and signing proves artifact identity only.
+
+## Release signing
+
+Android release builds are signed with a dedicated local release key, never the
+Android debug certificate. The key and its passwords stay on the machine that
+builds the release and are not part of the repository: `android/key.properties`
+and `android/app/encrynote-release.jks` are ignored by git, and must never be
+uploaded, attached to a release, or shared. Debug builds and the host tests need
+no signing credentials; a release build without them fails instead of falling
+back to the debug signer or an unsigned artifact.
+
+One-time local setup (from the repository root):
+
+```sh
+# 1. Create a long-lived RSA key. Type strong passwords when prompted and
+#    keep them only in android/key.properties below.
+keytool -genkeypair -v -storetype JKS \
+  -keystore android/app/encrynote-release.jks \
+  -keyalg RSA -keysize 4096 -validity 10000 \
+  -alias encrynote-release -dname "CN=EnCryNote, O=EnCryNote, OU=EnCryNote"
+
+# 2. Write android/key.properties (storeFile is relative to android/):
+#    storeFile=app/encrynote-release.jks
+#    storePassword=<the store password>
+#    keyAlias=encrynote-release
+#    keyPassword=<the key password>
+
+# 3. Restrict both files and confirm git ignores them.
+chmod 600 android/key.properties android/app/encrynote-release.jks
+git check-ignore android/key.properties android/app/encrynote-release.jks
+```
+
+Back up `android/key.properties` and `android/app/encrynote-release.jks`
+together, offline and encrypted, before publishing anything. Every later update
+must be signed with this same key and use a higher Android version code
+(`+N` in `pubspec.yaml`); Android refuses an update signed by a different key.
+If the key is lost, an installed release build can only be replaced by
+uninstalling it first, which deletes the app's private data.
+
+**Debug installs cannot be updated in place.** An app installed from a
+debug-signed build has a different certificate, so Android rejects the
+release-signed APK as an update. Export the notes to an `.encrynote` file first,
+then uninstall the old copy and install the release build. Uninstalling deletes
+the vault, so do this only on a device you own that holds no vault you need, and
+never install or uninstall on someone else's behalf.
 
 ## What the app guarantees, and what it does not
 
