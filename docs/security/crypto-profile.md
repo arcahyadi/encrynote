@@ -248,10 +248,10 @@ and are not quoted again. The pre-offload 4 MiB seal blocked the loop for
 seal-window check has been run on the host only — the macOS and Android
 integration runs of it are **Not run** after this change.
 
-The amended integration test also proves on-device: seal → reseal round-trip,
-`rewrapPassword` keeping notes, recovery still working after a password rewrap,
-rejection (`FailureCode.format`) of tampered recovery questions, and the
-seal-window event-loop progress check.
+Earlier on-device runs exercised seal/reseal round-trip, `rewrapPassword`
+preserving notes, recovery after rewrap, and tampered-question rejection. They
+used an older timing assertion and do not prove the current seal-window
+event-loop progress check; that updated device check remains **Not run**.
 
 Round-trip, recovery-key equality, reseal and wrong-password rejection passed on
 both platforms.
