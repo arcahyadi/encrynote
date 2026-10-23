@@ -614,6 +614,25 @@ void main() {
       expect(checks, contains('apkanalyzer'));
       expect(checks, contains('codesign'));
     });
+
+    test('the native checks current signing section names the version', () {
+      // A "current" heading that drifts from pubspec.yaml is the stale label a
+      // reader trusts; the dated evidence sections below it stay as recorded.
+      final version = RegExp(
+        r'^version:\s*(\S+)$',
+        multiLine: true,
+      ).firstMatch(source('pubspec.yaml'))!.group(1);
+      final heading = RegExp(
+        r'^### Current configuration \(version `([^`]+)`\)$',
+        multiLine: true,
+      ).firstMatch(source('docs/testing/native-checks.md'));
+      expect(
+        heading,
+        isNotNull,
+        reason: 'the current signing section must name its version',
+      );
+      expect(heading!.group(1), version);
+    });
   });
 
   group('integration commands cannot delete app data', () {

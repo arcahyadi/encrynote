@@ -249,7 +249,7 @@ documentation and tooling only and deliberately re-ran no native tests.
 
 ## Signing status
 
-### Current configuration (version `1.0.0-dev.1+1`)
+### Current configuration (version `1.0.0-dev.2+2`)
 
 Android release builds are signed with a dedicated local release key, not the
 Android debug certificate. `android/app/build.gradle.kts` declares an explicit
@@ -262,10 +262,15 @@ on the build machine and are never uploaded — see "Release signing" in
 
 macOS release builds remain ad-hoc/local-signed, as described below.
 
-This is a development pre-release (`1.0.0-dev.1+1`, tag `v1.0.0-dev.1`), not a
-store-signed, notarized, or published distribution. The release-signed Android
-artifact itself is built and inspected separately from this document; signing
-proves artifact identity only, not production readiness.
+This is a development pre-release (`1.0.0-dev.2+2`, installed as
+`io.github.arcahyadi.encrynote`), prepared locally for a Play upload but not
+uploaded, published or released: no tag or release exists for this version. The
+older published prototype `v1.0.0-dev.1` (`1.0.0-dev.1+1`, package
+`com.example.hello_flutter`) is a **separate app** signed with the same local
+release key, and its notes do not transfer automatically — only an `.encrynote`
+export/import does. The release-signed Android artifact itself is built and
+inspected separately from this document; signing proves artifact identity only,
+not production readiness.
 
 ### Earlier verification builds (2026-10-23, before commit `c64f5eb`)
 
