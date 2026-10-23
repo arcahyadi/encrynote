@@ -1,17 +1,154 @@
-# hello_flutter
+# EnCryNote
 
-A new Flutter project.
+A small, fully offline notebook for Android and macOS. Every note lives in one
+encrypted vault file in the app's private directory; there is no account, no
+cloud, no telemetry, no network code, and no update check.
 
-## Getting Started
+The UI is English (source strings in `lib/l10n/app_en.arb`). The application
+code is MIT licensed — see [LICENSE](LICENSE) and
+[third-party licences](#third-party-licences).
 
-This project is a starting point for a Flutter application.
+## Running it
 
-A few resources to get you started if this is your first Flutter project:
+Requires Flutter with Dart `^3.13.5`.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```sh
+flutter pub get
+flutter gen-l10n
+flutter run -d macos
+flutter run -d <android-device-id>
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Tests and builds:
+
+```sh
+flutter test
+flutter analyze
+flutter build apk --release
+flutter build macos --release
+flutter test integration_test/encrynote_flow_test.dart -d <device-id>
+```
+
+The release builds use development signing only (Android debug keystore, macOS
+ad-hoc/local signing). A successful local build is **not** a store-signed or
+published release.
+
+## What the app guarantees, and what it does not
+
+- **Cold start is always locked.** Nothing resumes a session from a previous
+  process: no key, password, or note content is stored for that purpose. The
+  auto-lock preference is about an already-unlocked session, not a shortcut past
+  the password.
+- **Two ways in.** The app password, or the three recovery questions and
+  answers chosen at setup. There is no third path, no recovery email, and no
+  recovery key. If the password and the needed answers are both lost, the notes
+  are unrecoverable.
+- **Recovery questions are readable while the vault is locked.** They are stored
+  as public header text so the recovery screen can show them. Do not put secrets
+  in a question. Guessable answers weaken recovery; that is a limit of the
+  design the user chose, not something the app can repair.
+- **Answers are case-sensitive** after trimming leading and trailing spaces.
+  Inner spaces and capitalisation must match exactly. Passwords are not trimmed
+  and are case-sensitive.
+- **Exports do not use recovery.** An `.encrynote` export is encrypted with the
+  export password you type when exporting. The app password and the recovery
+  answers cannot open it, and a forgotten export password cannot be recovered.
+  If the original vault is still accessible you can make a new export; the old
+  file stays unreadable.
+- **Imported `.md` files stay plaintext outside the app.** EnCryNote stores a
+  copy inside the encrypted vault and never modifies the source file. The
+  original `.md` on disk, in a cloud folder, or in a backup remains readable by
+  anything that can read that location.
+- **There has been no formal security audit.** This is a small, deliberately simple design
+  (Argon2id + AES-256-GCM, one encrypted snapshot per vault) but it has not been
+  audited by a third party. Do not treat the design or the tests as a security
+  guarantee.
+- **No perfect zeroization.** The app drops references to keys, passwords,
+  answers, and note text as soon as it can, and never writes plaintext to a
+  cache or temporary file. Dart and the OS do not guarantee that every copy in
+  memory is physically erased, so no zeroization claim is made.
+- **No absolute crash protection.** A commit writes staged ciphertext, syncs it,
+  replaces the vault, and syncs the directory; the previous generation is kept
+  and restored when a replacement fails. A change that never reached a
+  successful commit — for example a full disk followed by a power loss — is not
+  guaranteed to survive. A failed seal keeps the vault in RAM with the key so
+  the draft is not silently lost; the UI says so and keeps retrying until the
+  save succeeds. Do not treat "atomic" as "durable against every power loss".
+
+## Storage, sizes, and KDF
+
+| Limit | Value |
+| --- | --- |
+| One imported `.md` | 1 MiB |
+| Plaintext vault payload | 8 MiB |
+| Vault or export envelope | 16 MiB |
+
+Over-limit writes are refused explicitly; nothing is truncated. The whole vault
+is re-encrypted on every save, so a very large vault means a longer save; this
+has not been tuned for large vaults.
+
+The v1 crypto profile is fixed and is not negotiated: Argon2id with 19456 KiB
+(19 MiB) of memory, 2 iterations, parallelism 1, 32-byte hash, a fresh 16-byte
+salt per wrapper; AES-256-GCM with a 32-byte key, a fresh 12-byte nonce per
+encryption, and a 16-byte tag. The parser accepts only this profile. The memory
+cost is deliberate: unlocking needs ~19 MiB of free RAM on top of the app, which
+is fine on the supported platforms but noticeable on a low-memory Android
+device under pressure.
+
+`docs/security/crypto-profile.md` records the envelope layout, AAD domains, and
+measured timings.
+
+## Platform notes
+
+- **Android:** minimum SDK 24 (or Flutter's higher default). Automatic backup
+  is disabled and both backup rule files exclude every app data domain, so the
+  vault is not copied by the OS. Device-to-device transfer is excluded too. A
+  backup that the OS or the user controls is outside the app's reach; any copy
+  the app writes itself is always ciphertext.
+- **macOS:** deployment target macOS 12.0. The app runs sandboxed with only the
+  user-selected file read/write entitlement; the release entitlement enables no
+  network client or server.
+- The OS file picker is the only way files are read or written outside the
+  private directory. Markdown preview never loads remote images, fonts, or
+  stylesheets, and links are shown as selectable text rather than followed.
+
+## Privacy behaviour
+
+- The lock screen shows no note titles, snippets, or content.
+- While the app is unlocked, leaving it with **Immediately** selected locks it at
+  once; the other options count from the last user interaction, including while
+  the app is in the background. The native layer covers the window with an
+  opaque view while the app is not foregrounded so OS task snapshots do not
+  show notes.
+- A failed save freezes edits, import, export, and credential changes until the
+  sealed snapshot is written. The session keeps the key in memory for that
+  retry — the UI says the change is not saved yet rather than pretending the
+  vault is locked and clean.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, localization, and the native
+checklist. `docs/testing/native-checks.md` records which native checks were run,
+on which device and build mode, and which were not run.
+
+## Third-party licences
+
+The app code is MIT. Dependencies keep their own licences; they are **not**
+relicensed as MIT.
+
+| Package | Licence |
+| --- | --- |
+| `flutter`, `flutter_localizations`, `flutter_test`, `integration_test` | BSD-3-Clause (Flutter Authors) |
+| `flutter_lints` | BSD-3-Clause (Flutter Authors) |
+| `path_provider` | BSD-3-Clause (Flutter Authors) |
+| `flutter_markdown_plus` | BSD-3-Clause (Flutter Authors) |
+| `characters` | BSD-3-Clause (Dart project authors) |
+| `markdown` | BSD-3-Clause (Dart project authors) |
+| `intl` | BSD-3-Clause (Dart project authors) |
+| `cryptography` | Apache License 2.0 (Gohilla) |
+| `cupertino_icons` | MIT |
+
+Full texts ship with each package in the pub cache (`~/.pub-cache/hosted/pub.dev/<package>/LICENSE`).
+The `cryptography` package's Apache-2.0 terms apply to that dependency's code
+only; its use here does not change the app's MIT licence or add Apache terms to
+EnCryNote's own source.
