@@ -27,8 +27,17 @@ flutter test
 flutter analyze
 flutter build apk --release
 flutter build macos --release
-flutter test integration_test/encrynote_flow_test.dart -d <device-id>
+flutter test integration_test/encrynote_flow_test.dart -d <device-id> --no-uninstall
 ```
+
+**Always pass `--no-uninstall` to an integration test on a device.** The test
+build uses the product application id (`com.example.hello_flutter`), and
+`flutter test` uninstalls that package afterwards by default. Uninstalling
+deletes the app's private data directory, including `vault.enc` and
+`vault.previous` — so a run against a phone or emulator that holds a real vault
+destroys it. Use a device or emulator you own or can throw away that has **no
+personal vault** on it, and never a daily-driver install. `--no-uninstall` keeps
+the package (and its data) installed after the run.
 
 The release builds use development signing only (Android debug keystore, macOS
 ad-hoc/local signing). A successful local build is **not** a store-signed or
@@ -167,11 +176,15 @@ Direct dependencies and their licences (versions pinned in `pubspec.lock`):
 Transitive packages also ship code or native bindings in the bundles and are
 included in the same bundled NOTICES: `jni`, `jni_flutter`, `jni_util`,
 `objective_c`, `ffi`, `code_assets`, `hooks`, `path_provider_android`,
-`path_provider_foundation`, `crypto`, `collection`, `meta`, `logging`, `yaml`
-(MIT, Dart project authors), `material_color_utilities` and `sky_engine`
-(Apache-2.0), and the rest of `pubspec.lock`. Their licence classes are
-BSD-3-Clause or Apache-2.0 except `yaml`, which is MIT. The exact text for each
-is in the bundled NOTICES page; `pubspec.lock` is the pinned list.
+`path_provider_foundation`, `crypto`, `collection`, `meta`, `logging`, `yaml`,
+`material_color_utilities`, and the rest of `pubspec.lock`. Their licence classes
+are BSD-3-Clause or Apache-2.0 (`material_color_utilities` is Apache-2.0);
+`yaml` is MIT with the Dart project and Kiri Wagstaff copyright lines. The exact
+text for each is in the bundled NOTICES page, and `pubspec.lock` is the pinned
+list.
+
+`sky_engine` is SDK-vendored rather than a pub package and has **no** entry in
+the bundled NOTICES; it is not a separately distributed work here.
 
 The `cryptography` package's Apache-2.0 terms apply to that dependency's code
 only; its use here does not change the app's MIT licence or add Apache terms to

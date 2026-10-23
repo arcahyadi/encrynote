@@ -42,10 +42,18 @@ flutter test
 - Unit and widget tests live under `test/`, mirroring `lib/`.
 - `test/project_contract_test.dart` checks release contracts that are easy to
   break by accident: the English ARB, the exact auto-lock labels, no network
-  permission in the release configuration, Android backup exclusion, the
-  licence, and the README facts. Update the document and the test together.
+  permission in the release configuration, Android backup exclusion per section,
+  the licence, the README facts, and that every documented integration command
+  passes `--no-uninstall`. Update the document and the test together.
 - `integration_test/` runs against a real device or desktop and uses the real
   crypto and store. Do not replace them with fakes there.
+- **Device integration runs must pass `--no-uninstall`** and must target a
+  device or emulator you own or can throw away that holds **no personal vault**.
+  The test build reuses the product application id
+  (`com.example.hello_flutter`), and `flutter test` uninstalls that package
+  afterwards by default, which deletes its whole private data directory
+  (`vault.enc`, `vault.previous`). A test-owned subdirectory inside the app does
+  not protect a real vault from a package uninstall.
 - Tests that need scratch files create a unique directory inside the project or
   the app's private support directory and delete only what they created. Never
   point a test at a live vault.

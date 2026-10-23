@@ -12,8 +12,13 @@ import '../test/support/fixtures.dart';
 /// Runs the real v1 crypto profile on the target platform.
 ///
 /// Usage:
-///   flutter test integration_test/crypto_platform_test.dart -d macos
-///   `flutter test integration_test/crypto_platform_test.dart -d DEVICE_ID`
+///   flutter test integration_test/crypto_platform_test.dart -d macos --no-uninstall
+///   `flutter test integration_test/crypto_platform_test.dart -d DEVICE_ID --no-uninstall`
+///
+/// Use `--no-uninstall` on an owned or disposable target with no personal vault;
+/// the test build uses the product application id and the tool uninstalls it by
+/// default, deleting that package's private data. See
+/// `docs/testing/native-checks.md`.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final crypto = VaultCrypto();

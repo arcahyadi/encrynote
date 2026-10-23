@@ -10,6 +10,19 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-22-encrynote-design.md` (disetujui untuk perencanaan).
 
+> **Safety supersession (2026-10-23, Task 8 fix round 2):** the commands written
+> into this frozen plan predate a known data-loss hazard. Any
+> `flutter test integration_test/...` command here is subordinate to the current
+> rule: add `--no-uninstall` and use only an owned or disposable device or
+> emulator holding no personal vault. The test build reuses the product
+> application id (`com.example.hello_flutter`), and the tool uninstalls that
+> package by default, deleting its private `vault.enc`/`vault.previous`. Do not
+> run the plan's device commands as literally written. The authoritative,
+> current commands live in `README.md`, `CONTRIBUTING.md`, and
+> `docs/testing/native-checks.md`. The plan text itself is left unchanged as a
+> historical record.
+
+
 **Status:** Rencana belum disetujui untuk dieksekusi. Tidak ada langkah implementasi yang sudah dikerjakan. Contoh kode di dokumen ini adalah rancangan test, bukan perubahan source aplikasi.
 
 ## Global Constraints

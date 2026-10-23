@@ -15,8 +15,13 @@ import 'package:path_provider/path_provider.dart';
 /// Exercises the real native privacy channel on the target platform.
 ///
 /// Usage:
-///   flutter test integration_test/privacy_platform_test.dart -d macos
-///   flutter test integration_test/privacy_platform_test.dart -d DEVICE_ID
+///   flutter test integration_test/privacy_platform_test.dart -d macos --no-uninstall
+///   flutter test integration_test/privacy_platform_test.dart -d DEVICE_ID --no-uninstall
+///
+/// Use `--no-uninstall` on an owned or disposable target with no personal vault;
+/// the test build uses the product application id and the tool uninstalls it by
+/// default, deleting that package's private data. See
+/// `docs/testing/native-checks.md`.
 ///
 /// The cover is painted by the platform and the OS snapshot is taken by the
 /// system compositor, so no test here can observe the snapshot itself. What the

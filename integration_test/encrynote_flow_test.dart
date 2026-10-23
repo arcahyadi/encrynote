@@ -21,16 +21,21 @@ import '../test/support/fixtures.dart';
 /// hands back test-owned exchange files instead of showing a panel.
 ///
 /// Usage:
-///   flutter test integration_test/encrynote_flow_test.dart -d macos
-///   flutter test integration_test/encrynote_flow_test.dart -d DEVICE_ID
+///   flutter test integration_test/encrynote_flow_test.dart -d macos --no-uninstall
+///   flutter test integration_test/encrynote_flow_test.dart -d DEVICE_ID --no-uninstall
+///
+/// Always pass `--no-uninstall`, and only on a device or emulator you own or can
+/// throw away that holds no personal vault. The test build uses the product
+/// application id, and `flutter test` uninstalls that package afterwards by
+/// default, which deletes its private data directory (`vault.enc`,
+/// `vault.previous`). A test-owned subdirectory does not protect a real vault.
 ///
 /// Cross-platform exchange (both directions):
 ///   1. Run on platform A; the log prints `EXCHANGE_EXPORT=<path>` and
 ///      `EXCHANGE_EXPORT_BASE64=<artifact>`. Copy the path when the host can
 ///      reach the app's private directory; otherwise decode the base64 into a
 ///      file the host can write (for example `/data/local/tmp/` via `adb push`).
-///      `flutter test` uninstalls the app afterwards by default, so the base64
-///      form is the reliable one to keep.
+///      The base64 form also works when the app is uninstalled afterwards.
 ///   2. Copy that file to a test-owned path on platform B.
 ///   3. Run on B with
 ///      `--dart-define=ENCRYNOTE_IMPORT_ARTIFACT=<path>`
@@ -133,9 +138,11 @@ void main() {
       await session.flushSave();
       expect(session.data!.notes.single.markdown, note.markdown);
 
-      // --- restart: a new process is always locked -------------------------
-      // A fresh session over the same files is the cold-start case: no key, no
-      // notes, only the public recovery questions.
+      // --- locked session over the same files ------------------------------
+      // A fresh session over the same files is the service-level cold-start
+      // case: no key, no notes, only the public recovery questions. The
+      // process-level "nothing was persisted" guarantee is covered by
+      // test/lock/privacy_lifecycle_test.dart, not here.
       await session.lock();
       expect(session.phase, SessionPhase.locked);
 

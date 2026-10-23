@@ -16,8 +16,13 @@ import '../test/support/fixtures.dart';
 /// Exercises the real native transfer channel on the target platform.
 ///
 /// Usage:
-///   flutter test integration_test/transfer_platform_test.dart -d macos
-///   flutter test integration_test/transfer_platform_test.dart -d DEVICE_ID
+///   flutter test integration_test/transfer_platform_test.dart -d macos --no-uninstall
+///   flutter test integration_test/transfer_platform_test.dart -d DEVICE_ID --no-uninstall
+///
+/// Use `--no-uninstall` on an owned or disposable target with no personal vault;
+/// the test build uses the product application id and the tool uninstalls it by
+/// default, deleting that package's private data. See
+/// `docs/testing/native-checks.md`.
 ///
 /// The picker is a human-driven OS panel, so this test does not click it. It
 /// covers what can be checked without a person: the channel's refusal of an

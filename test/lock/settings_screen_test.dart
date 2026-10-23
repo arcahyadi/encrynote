@@ -215,9 +215,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('licensesButton')));
     await tester.pumpAndSettle();
 
-    // The standard Flutter page reads LicenseRegistry, which the engine fills
-    // from the NOTICES asset; its title and back affordance are enough to prove
-    // the route exists and shows third-party text rather than an empty page.
+    // This only proves the route and page render. The text itself comes from
+    // the NOTICES asset at runtime, which this widget test cannot read (the
+    // test binding registers no licences); the flow test's asset check is the
+    // real proof that third-party text ships.
     expect(find.text('Licenses'), findsOneWidget);
     expect(find.byType(LicensePage), findsOneWidget);
     expect(find.text('EnCryNote'), findsWidgets);

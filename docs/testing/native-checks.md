@@ -14,6 +14,25 @@ Archived command output for each run below lives in
 Every command below is copy-pasteable from the repository root. `build/` is
 generated, not committed; run the build first.
 
+### One command for the whole release policy
+
+```sh
+flutter build apk --release --target=lib/main.dart
+flutter build macos --release --target=lib/main.dart
+./tool/release_checks.sh
+```
+
+The script prints every artifact fact and then a policy verdict. It exits
+non-zero if a required tool, artifact, or compiled-resource lookup is missing,
+and prints `POLICY=PASS checks=9` only when all of these hold in the built
+artifacts: no INTERNET/network-state permission, no `<service>`, backup disabled
+with both rule resources, all five used domains excluded in
+`full-backup-content`, `cloud-backup`, and `device-transfer`, no network
+entitlement in the sealed bundle, sandbox plus user-selected file access kept,
+and the bundled notices carrying the licence texts. Without `POLICY=PASS` treat
+the output as a report, not a pass. The script has its own self-checks:
+`flutter test test/tool/release_checks_test.dart`.
+
 ### Release artifact permissions (Android)
 
 ```sh
@@ -69,20 +88,29 @@ sealed output must be archived with the run.
 
 ### Integration flows
 
-```sh
-flutter test integration_test/encrynote_flow_test.dart -d macos
-flutter test integration_test/encrynote_flow_test.dart -d <android-device-id>
-flutter test integration_test/storage_platform_test.dart -d <device-id>
-flutter test integration_test/privacy_platform_test.dart -d <device-id>
-flutter test integration_test/transfer_platform_test.dart -d <device-id>
-flutter test integration_test/crypto_platform_test.dart -d <device-id>
-```
+**Before any device run:** use a device or emulator you own or can throw away
+that holds **no personal vault**, and always pass `--no-uninstall`.
 
-`flutter test` on an integration test installs the app and **uninstalls it
-afterwards by default** (`--uninstall` defaults to true; pass `--no-uninstall`
-to keep it). That matters only if you want to pull a file out of the app's
-private directory afterwards; the app is debuggable, so `adb run-as` works while
-it is installed.
+The test build reuses the product application id
+(`android/app/build.gradle.kts`: `applicationId = "com.example.hello_flutter"`).
+`flutter test` on an integration test installs that package and **uninstalls it
+afterwards by default** (`--uninstall` defaults to true; `flutter test --help`
+is the authority). Uninstalling a package deletes its whole private data
+directory, so on a device that holds the real app this removes `vault.enc` and
+`vault.previous` — the notes are gone, not just inconvenient to pull. A
+test-owned subdirectory inside the app does not help, because the uninstall
+removes the package data root. `--no-uninstall` keeps the package and its data
+installed after the run; the app is debuggable, so `adb run-as` still works
+while it is installed.
+
+```sh
+flutter test integration_test/encrynote_flow_test.dart -d macos --no-uninstall
+flutter test integration_test/encrynote_flow_test.dart -d <android-device-id> --no-uninstall
+flutter test integration_test/storage_platform_test.dart -d <device-id> --no-uninstall
+flutter test integration_test/privacy_platform_test.dart -d <device-id> --no-uninstall
+flutter test integration_test/transfer_platform_test.dart -d <device-id> --no-uninstall
+flutter test integration_test/crypto_platform_test.dart -d <device-id> --no-uninstall
+```
 
 The flow test is **service-level**: it drives `NoteSession`, `VaultStore`,
 `VaultCrypto` and `TransferService` with the real native commit channel. It
@@ -96,6 +124,10 @@ flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/encrynote_flow_test.dart -d <device-id> --profile
 ```
 
+`flutter drive` does not take `--no-uninstall`; it leaves the app installed.
+Still use an owned or disposable target with no personal vault, because it
+installs over the product application id.
+
 ### Android ↔ macOS export exchange
 
 The flow test writes an export into a directory this run owns and prints it as
@@ -104,9 +136,17 @@ artifact through a test log; it is not a product path, and the file still opens
 only with its export password. The run deletes its own directories in
 `tearDownAll`.
 
+Both sides follow the same device rule: owned or disposable target, no personal
+vault, `--no-uninstall`.
+
 1. On the source platform run
-   `flutter test integration_test/encrynote_flow_test.dart -d <source>
-   --dart-define=ENCRYNOTE_MARKER=<source marker>`
+
+   ```sh
+   flutter test integration_test/encrynote_flow_test.dart -d <source> \
+     --no-uninstall \
+     --dart-define=ENCRYNOTE_MARKER=<source marker>
+   ```
+
    and note `EXCHANGE_EXPORT_BASE64=` in the log.
 2. Put the decoded artifact somewhere the destination can read: on macOS inside
    the app container (the sandbox cannot read the project directory), on
@@ -115,6 +155,7 @@ only with its export password. The run deletes its own directories in
 
    ```sh
    flutter test integration_test/encrynote_flow_test.dart -d <destination> \
+     --no-uninstall \
      --dart-define=ENCRYNOTE_IMPORT_ARTIFACT=<destination path> \
      --dart-define=ENCRYNOTE_EXPECT_MARKER=<marker from the source log>
    ```
@@ -131,13 +172,14 @@ only the dialog, never the crypto or the store.
 ## What was run (fix round 1)
 
 Every row below has a matching log in
-`.superpowers/sdd/encrynote-20261022/fix1-*.log`; the counts are those in the
-logs, not re-typed from memory.
+`.superpowers/sdd/encrynote-20261022/`; the counts are those in the logs, not
+re-typed from memory. These are **fix round 1** records; fix round 2 changed
+documentation and tooling only and deliberately re-ran no native tests.
 
 | Area | Device / OS | Build | Result | Log |
 | --- | --- | --- | --- | --- |
-| Unit + widget suite | macOS 27.0.1 | debug-JIT | See the report for the final count | `fix1-suite.log` |
-| Project contract test (18 tests) | macOS 27.0.1 | debug-JIT | Pass | `fix1-contract.log` |
+| Unit + widget suite | macOS 27.0.1 | debug-JIT | `+282: All tests passed!` | `fix1-suite.log` |
+| Project contract test (21 tests at the time) | macOS 27.0.1 | debug-JIT | Pass | `fix1-contract.log` |
 | Service-level flow: setup → write → lock → unlock → recovery → export → import | macOS 27.0.1 | debug-JIT | Pass | `fix1-flow-macos.log` |
 | Service-level flow, same case | Android emulator API 37 | debug-JIT | Pass | `fix1-flow-android.log` |
 | Service-level flow (AOT) | macOS 27.0.1 | profile-AOT | Pass | `fix1-flow-macos-profile.log` |
@@ -148,12 +190,15 @@ logs, not re-typed from memory.
 | Storage commit + rollback | macOS + Android emulator | debug-JIT | Pass | `fix1-platform-suites.log` |
 | Privacy cover + focus stream | macOS + Android emulator | debug-JIT | Pass | `fix1-platform-suites.log` |
 | Transfer channel / unknown handle | macOS + Android emulator | debug-JIT | Pass | `fix1-platform-suites.log` |
-| Crypto profile | macOS + Android emulator | debug-JIT | Pass | `fix1-platform-suites.log` |
-| Release APK permissions | — | `flutter build apk --release` | Pass: no INTERNET, no network state | `fix1-artifact-checks.log` |
-| Release APK compiled backup rules | — | release APK | Pass: every domain excluded in each section | `fix1-artifact-checks.log` |
-| Release macOS sealed entitlements | — | `flutter build macos --release` | Pass: sandbox + user-selected files + development `get-task-allow`; no network | `fix1-artifact-checks.log` |
-| Release APK target | — | release APK | `lib/main.dart` is the release entry point (build log) | `fix1-apk-build.log` |
+| Crypto profile | macOS + Android emulator | debug-JIT | Pass | `fix1-crypto-suites.log`; the two cold-start failures are in `fix1-platform-suites-retry.log` |
+| Release APK permissions | — | `flutter build apk --release` | Pass: no INTERNET, no network state | `fix1-artifact-checks.log`, `fix2-artifact-checks.log` |
+| Release APK compiled backup rules | — | release APK | Pass: every domain excluded in each section | `fix1-artifact-checks.log`, `fix2-artifact-checks.log` |
+| Release macOS sealed entitlements | — | `flutter build macos --release` | Pass: sandbox + user-selected files + development `get-task-allow`; no network | `fix1-artifact-checks.log`, `fix2-artifact-checks.log` |
+| Release APK target | — | release APK | `lib/main.dart` is the release entry point (build log) | `fix1-apk-build.log`, `fix1-release-target.log` |
 | Offline operation | Android emulator, airplane mode, `ping` unreachable | debug-JIT | Pass; connectivity restored afterwards | `fix1-offline.log` |
+| Integration-test uninstall default | macOS host, read-only help | — | `--[no-]uninstall` documented, `(defaults to on)` | `fix2-uninstall-help.log` |
+| Release policy helper | macOS host, no device | — | `POLICY=PASS checks=9`; fails closed on a missing artifact or SDK | `fix2-artifact-checks.log` |
+| Helper self-checks | macOS host | debug-JIT | 8 tests: clean pass plus 7 failing mutations | `fix2-tool-tests.log` |
 
 ## Not run, and why
 

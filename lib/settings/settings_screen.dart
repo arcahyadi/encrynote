@@ -149,11 +149,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: Text(l10n.settingsLicensesButton),
                 // The standard Flutter page reads LicenseRegistry, which the
                 // engine fills from the bundled NOTICES asset, so every shipped
-                // dependency's text is readable inside the app.
+                // dependency's text is readable inside the app. No version is
+                // passed: the page's default reads nothing, and a hardcoded
+                // string here would silently drift from pubspec.yaml.
                 onTap: () => showLicensePage(
                   context: context,
                   applicationName: l10n.appTitle,
-                  applicationVersion: '1.0.0',
                 ),
               ),
             ],

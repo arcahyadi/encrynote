@@ -13,8 +13,13 @@ import '../test/support/fixtures.dart';
 /// Exercises the real native commit handler on the target platform.
 ///
 /// Usage:
-///   flutter test integration_test/storage_platform_test.dart -d macos
-///   flutter test integration_test/storage_platform_test.dart -d DEVICE_ID
+///   flutter test integration_test/storage_platform_test.dart -d macos --no-uninstall
+///   flutter test integration_test/storage_platform_test.dart -d DEVICE_ID --no-uninstall
+///
+/// Use `--no-uninstall` on an owned or disposable target with no personal vault;
+/// the test build uses the product application id and the tool uninstalls it by
+/// default, deleting that package's private data. See
+/// `docs/testing/native-checks.md`.
 ///
 /// Every run writes into its own fresh subdirectory of the app's private
 /// support root (`encrynote_test_<pid>_<microseconds>`) and deletes only that

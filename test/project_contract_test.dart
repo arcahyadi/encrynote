@@ -377,4 +377,129 @@ void main() {
       expect(checks, contains('codesign'));
     });
   });
+
+  group('integration commands cannot delete app data', () {
+    /// Every `flutter test integration_test/...` command in a document or in a
+    /// test's usage comment must carry `--no-uninstall`.
+    ///
+    /// The test APK uses the product application id, so the tool's default
+    /// uninstall removes that package's whole data directory, including a real
+    /// vault. A test-owned subdirectory does not help.
+    void expectSafeCommands(String text, String origin) {
+      // Join backslash continuations first: one shell command can span lines,
+      // and the flag may sit on a later one.
+      final raw = text.split('\n');
+      final commands = <String>[];
+      final startLines = <int>[];
+      for (var i = 0; i < raw.length; i++) {
+        var line = raw[i];
+        final start = i + 1;
+        while (line.trimRight().endsWith('\\') && i + 1 < raw.length) {
+          line =
+              '${line.trimRight().substring(0, line.trimRight().length - 1)}'
+              ' ${raw[++i]}';
+        }
+        commands.add(line);
+        startLines.add(start);
+      }
+      for (var i = 0; i < commands.length; i++) {
+        final line = commands[i];
+        if (!line.contains('flutter test integration_test/')) continue;
+        expect(
+          line.contains('--no-uninstall'),
+          isTrue,
+          reason:
+              '$origin:${startLines[i]} runs an integration test without '
+              '--no-uninstall: ${line.trim()}',
+        );
+      }
+    }
+
+    test('README test commands are safe', () {
+      expectSafeCommands(source('README.md'), 'README.md');
+    });
+
+    test('CONTRIBUTING test commands are safe', () {
+      expectSafeCommands(source('CONTRIBUTING.md'), 'CONTRIBUTING.md');
+    });
+
+    test('native-checks commands are safe', () {
+      expectSafeCommands(
+        source('docs/testing/native-checks.md'),
+        'docs/testing/native-checks.md',
+      );
+    });
+
+    test('integration test usage comments are safe', () {
+      for (final file
+          in Directory('$root/integration_test')
+              .listSync()
+              .whereType<File>()
+              .where((file) => file.path.endsWith('.dart'))) {
+        expectSafeCommands(file.readAsStringSync(), file.path);
+      }
+    });
+
+    test('the docs explain the data-loss reason and the owned-target rule', () {
+      final checks = source('docs/testing/native-checks.md');
+      expect(checks, contains('--no-uninstall'));
+      // Not a file-pulling inconvenience: uninstall deletes package data.
+      expect(
+        RegExp(
+          r'uninstall[^.]{0,200}(data|vault)',
+          caseSensitive: false,
+        ).hasMatch(checks),
+        isTrue,
+        reason: 'uninstall must be described as data loss',
+      );
+      expect(
+        RegExp(
+          r'owned|disposable|no personal vault',
+          caseSensitive: false,
+        ).hasMatch(checks),
+        isTrue,
+        reason: 'the target must be owned/disposable',
+      );
+      // The product application id is shared, so say so.
+      expect(checks, contains('com.example.hello_flutter'));
+    });
+
+    test('README warns that the device must hold no personal vault', () {
+      final readme = source('README.md');
+      expect(readme, contains('--no-uninstall'));
+      expect(
+        RegExp(
+          r'personal vault|owned|disposable',
+          caseSensitive: false,
+        ).hasMatch(readme),
+        isTrue,
+      );
+    });
+
+    test(
+      'the frozen plan keeps its old commands but points at the new rule',
+      () {
+        final plan = source(
+          'docs/superpowers/plans/2026-10-22-encrynote-implementation.md',
+        );
+        // The historical step is not rewritten...
+        expect(
+          plan,
+          contains('flutter test integration_test/encrynote_flow_test.dart'),
+        );
+        // ...but a reader is told the current rule wins.
+        expect(plan, contains('Safety supersession'));
+        expect(plan, contains('--no-uninstall'));
+        expect(plan, contains('docs/testing/native-checks.md'));
+      },
+    );
+
+    test('the release helper documents its fail-closed policy', () {
+      final script = source('tool/release_checks.sh');
+      expect(script, contains('set -eu'));
+      expect(script, contains('POLICY=PASS'));
+      expect(script, contains('POLICY=FAIL'));
+      expect(script, contains('fail '));
+    });
+  });
 }
