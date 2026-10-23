@@ -247,17 +247,41 @@ documentation and tooling only and deliberately re-ran no native tests.
 
 ## Signing status
 
-Both release builds use development identities:
+### Current configuration (version `1.0.0-dev.1+1`)
+
+Android release builds are signed with a dedicated local release key, not the
+Android debug certificate. `android/app/build.gradle.kts` declares an explicit
+`release` signing config and reads `storeFile`, `storePassword`, `keyAlias`, and
+`keyPassword` from the git-ignored `android/key.properties`. A release task
+without that file fails closed instead of falling back to the debug signer;
+debug builds and host tests need no credentials. The key and its passwords stay
+on the build machine and are never uploaded — see "Release signing" in
+[README.md](../../README.md).
+
+macOS release builds remain ad-hoc/local-signed, as described below.
+
+This is a development pre-release (`1.0.0-dev.1+1`, tag `v1.0.0-dev.1`), not a
+store-signed, notarized, or published distribution. The release-signed Android
+artifact itself is built and inspected separately from this document; signing
+proves artifact identity only, not production readiness.
+
+### Earlier verification builds (2026-10-23, before commit `c64f5eb`)
+
+The artifact checks recorded above, and their archived `fix*.log` output, were
+made on builds that used development identities. Their outcomes stand as
+recorded and were not re-run:
 
 - Android: `signingConfig = signingConfigs.getByName("debug")` in
-  `android/app/build.gradle.kts`. The release APK is debug-signed.
+  `android/app/build.gradle.kts`. Those release APKs were debug-signed. The
+  current configuration no longer does this.
 - macOS: `Signature=adhoc`, `TeamIdentifier=not set`, and the sealed
   entitlements include `com.apple.security.get-task-allow` — a development
-  signing artifact. The bundle is not notarized and not distribution-signed.
+  signing artifact. The bundle is not notarized and not distribution-signed;
+  macOS signing is unchanged.
 
-A local release build is therefore **not** a store-signed or published artifact.
-Production signing, notarization, and publication are separate, unrequested
-work.
+A local build from those runs is therefore **not** a store-signed or published
+artifact. Production signing, notarization, and publication are separate,
+unrequested work.
 
 ## Process safety note
 
