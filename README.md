@@ -38,8 +38,8 @@ code is MIT licensed — see [LICENSE](LICENSE) and
 
 Android and macOS are the current development targets. Nothing here is a
 production or store release. The current Android development version is
-`1.0.0-dev.2+2`; the published prototype pre-release `v1.0.0-dev.1+1` stays at
-package `com.example.hello_flutter`. The `1.0.0-dev.2+2` build installs as
+`1.0.0-dev.3+3`; the published prototype pre-release `v1.0.0-dev.1+1` stays at
+package `com.example.hello_flutter`. The `1.0.0-dev.3+3` build installs as
 `io.github.arcahyadi.encrynote`, a **separate app** signed with the same local
 release key.
 
@@ -132,7 +132,7 @@ If the key is lost, an installed release build can only be replaced by
 uninstalling it first, which deletes the app's private data.
 
 **The Play package is a separate app, not an update.** The published prototype
-installs as `com.example.hello_flutter`; the `1.0.0-dev.2+2` build installs as
+installs as `com.example.hello_flutter`; the `1.0.0-dev.3+3` build installs as
 `io.github.arcahyadi.encrynote`. Both are signed with this local key, but Android
 keeps each package's private data separate, so installing the new package does
 not move notes across and there is no automatic transfer. To carry notes over,

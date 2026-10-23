@@ -249,7 +249,7 @@ documentation and tooling only and deliberately re-ran no native tests.
 
 ## Signing status
 
-### Current configuration (version `1.0.0-dev.2+2`)
+### Current configuration (version `1.0.0-dev.3+3`)
 
 Android release builds are signed with a dedicated local release key, not the
 Android debug certificate. `android/app/build.gradle.kts` declares an explicit
@@ -262,7 +262,7 @@ on the build machine and are never uploaded — see "Release signing" in
 
 macOS release builds remain ad-hoc/local-signed, as described below.
 
-This is a development pre-release (`1.0.0-dev.2+2`, installed as
+This is a development pre-release (`1.0.0-dev.3+3`, installed as
 `io.github.arcahyadi.encrynote`), prepared locally for a Play upload but not
 uploaded, published or released: no tag or release exists for this version. The
 older published prototype `v1.0.0-dev.1` (`1.0.0-dev.1+1`, package

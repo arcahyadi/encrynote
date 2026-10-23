@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../session/note_session.dart';
 import '../vault/vault_types.dart';
+import 'privacy_policy_screen.dart';
 
 /// The four approved auto-lock choices, saved through [NoteSession].
 ///
@@ -144,6 +145,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               const Divider(height: 32),
+              ListTile(
+                key: const ValueKey('privacyPolicyButton'),
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: Text(l10n.settingsPrivacyButton),
+                // A pushed route, not showLicensePage: the policy is the app's
+                // own bundled text and has to work with no network at all.
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const PrivacyPolicyScreen(),
+                  ),
+                ),
+              ),
               ListTile(
                 key: const ValueKey('licensesButton'),
                 leading: const Icon(Icons.description_outlined),

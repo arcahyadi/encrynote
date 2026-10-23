@@ -514,6 +514,24 @@ abstract class AppLocalizations {
   /// **'Licences'**
   String get settingsLicensesButton;
 
+  /// No description provided for @settingsPrivacyButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy policy'**
+  String get settingsPrivacyButton;
+
+  /// No description provided for @privacyPolicyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy policy'**
+  String get privacyPolicyTitle;
+
+  /// No description provided for @privacyPolicyBody.
+  ///
+  /// In en, this message translates to:
+  /// **'EnCryNote is an offline notes app developed by arcahyadi. This policy applies to version 1.0.0-dev.3, effective 23 October 2026.\n\nEnCryNote works fully offline. There is no account, no cloud sync, no telemetry, no analytics and no advertising. The app requests no network permission and contains no network code, so your notes cannot be sent anywhere.\n\nNotes are stored encrypted at rest in the app\'s private storage, using Argon2id to derive the key and AES-256-GCM to encrypt the vault. The app password and the three recovery questions and answers are chosen by you and are never transmitted.\n\nRecovery questions are stored as readable header text so they can be shown while the vault is locked. Anyone with access to the device can read them, so do not put secrets in the recovery questions.\n\nImporting a .md file stores a copy encrypted in the vault. The original .md file outside the app stays plaintext and is not modified or deleted. Exporting notes creates an .encrynote file protected only by the export password you choose; recovery questions cannot open it, and a forgotten export password cannot be recovered.\n\nDeleting the app\'s data or uninstalling the app removes the local vault from the device. Files you exported or imported outside the app are not affected.\n\nThird-party licences are bundled with the app and can be read under Settings, then Licences.\n\nThis policy may change when the app changes. The version above is the one it describes. Questions about EnCryNote or this policy can be sent to stikes.isfi@gmail.com.'**
+  String get privacyPolicyBody;
+
   /// No description provided for @settingsSaveFailed.
   ///
   /// In en, this message translates to:

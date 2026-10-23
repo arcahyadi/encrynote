@@ -361,11 +361,29 @@ void main() {
     test('the development version is the next pre-release', () {
       expect(
         RegExp(
-          r'^version: 1\.0\.0-dev\.2\+2$',
+          r'^version: 1\.0\.0-dev\.3\+3$',
           multiLine: true,
         ).hasMatch(pubspec),
         isTrue,
-        reason: 'pubspec.yaml must declare 1.0.0-dev.2+2',
+        reason: 'pubspec.yaml must declare 1.0.0-dev.3+3',
+      );
+    });
+
+    test('the feature graphic is a 1024x500 opaque PNG', () {
+      const path = 'assets/branding/feature-graphic.png';
+      expect(exists(path), isTrue, reason: '$path must be committed');
+      final png = pngFacts(path);
+      expect(png['width'], 1024, reason: path);
+      expect(png['height'], 500, reason: path);
+      // Truecolour without alpha: the store graphic is fully opaque.
+      expect(png['colorType'], 2, reason: '$path must have no alpha channel');
+      expect(
+        (png['chunks'] as List).where(
+          (chunk) =>
+              const {'eXIf', 'tEXt', 'iTXt', 'zTXt', 'iCCP'}.contains(chunk),
+        ),
+        isEmpty,
+        reason: '$path must carry no EXIF or private metadata',
       );
     });
 
@@ -633,6 +651,114 @@ void main() {
       );
       expect(heading!.group(1), version);
     });
+  });
+
+  group('privacy policy', () {
+    test('the app has a read-only policy screen reachable from settings', () {
+      expect(exists('lib/settings/privacy_policy_screen.dart'), isTrue);
+      final screen = source('lib/settings/privacy_policy_screen.dart');
+      expect(screen, contains('privacyPolicyBody'));
+      expect(screen, isNot(contains('showLicensePage')));
+      // No WebView, no network, no external link: the text is local.
+      expect(screen, contains('SingleChildScrollView'));
+
+      final settings = source('lib/settings/settings_screen.dart');
+      expect(settings, contains("ValueKey('privacyPolicyButton')"));
+      expect(settings, contains('PrivacyPolicyScreen'));
+      expect(settings, contains('Navigator.of(context).push'));
+      expect(
+        settings,
+        contains('MaterialPageRoute'),
+        reason: 'the policy is a pushed route, not the licence page',
+      );
+
+      for (final key in [
+        'settingsPrivacyButton',
+        'privacyPolicyTitle',
+        'privacyPolicyBody',
+      ]) {
+        expect(englishArb[key], isA<String>(), reason: key);
+        final value = englishArb[key] as String;
+        expect(value.trim(), isNotEmpty, reason: key);
+        // One string, no placeholders: the text is static policy copy.
+        expect(value.contains('{'), isFalse, reason: key);
+        expect(englishArb.containsKey('@$key'), isFalse, reason: key);
+      }
+    });
+
+    test('the in-app policy states what this app actually does', () {
+      final body = englishArb['privacyPolicyBody'] as String;
+      expect(
+        body,
+        contains('\n\n'),
+        reason: 'paragraph breaks separate sections',
+      );
+      for (final fact in [
+        'offline',
+        'no account',
+        'no telemetry',
+        'no analytics',
+        'no advertising',
+        'no network permission',
+        'Argon2id',
+        'AES-256-GCM',
+        'never transmitted',
+        'recovery questions',
+        'plaintext',
+        'export password',
+        'uninstall',
+        'Licences',
+        'stikes.isfi@gmail.com',
+        'arcahyadi',
+        '23 October 2026',
+        '1.0.0-dev.3',
+      ]) {
+        expect(body, contains(fact), reason: 'the policy must state $fact');
+      }
+      // Claims the app cannot support must stay out.
+      for (final overclaim in ['audit', 'certified', 'zeroization']) {
+        expect(body.toLowerCase(), isNot(contains(overclaim)));
+      }
+    });
+
+    test(
+      'the public policy page is self-contained and makes the same claims',
+      () {
+        expect(exists('privacy.html'), isTrue);
+        expect(exists('.nojekyll'), isTrue);
+        expect(
+          File('$root/.nojekyll').readAsBytesSync(),
+          isEmpty,
+          reason: '.nojekyll only has to exist for GitHub Pages',
+        );
+
+        final page = source('privacy.html');
+        expect(page, contains('<title>'));
+        expect(page, contains('<meta name="viewport"'));
+        // Self-contained: no remote resource and no script at all.
+        expect(page.contains('http://'), isFalse);
+        expect(page.contains('https://'), isFalse);
+        expect(page.toLowerCase().contains('<script'), isFalse);
+        expect(page.toLowerCase().contains('<link'), isFalse);
+        expect(page.contains('src='), isFalse);
+
+        for (final fact in [
+          'offline',
+          'Argon2id',
+          'AES-256-GCM',
+          'recovery questions',
+          'plaintext',
+          'export password',
+          'uninstall',
+          'Licences',
+          'stikes.isfi@gmail.com',
+          '23 October 2026',
+          '1.0.0-dev.3',
+        ]) {
+          expect(page, contains(fact), reason: 'privacy.html must state $fact');
+        }
+      },
+    );
   });
 
   group('integration commands cannot delete app data', () {

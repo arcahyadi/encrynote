@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hello_flutter/l10n/generated/app_localizations.dart';
 import 'package:hello_flutter/session/note_session.dart';
+import 'package:hello_flutter/settings/privacy_policy_screen.dart';
 import 'package:hello_flutter/settings/settings_screen.dart';
 import 'package:hello_flutter/vault/vault_crypto.dart';
 import 'package:hello_flutter/vault/vault_store.dart';
@@ -222,6 +223,35 @@ void main() {
     expect(find.text('Licenses'), findsOneWidget);
     expect(find.byType(LicensePage), findsOneWidget);
     expect(find.text('EnCryNote'), findsWidgets);
+  });
+
+  testWidgets('the privacy policy opens from settings and renders its text', (
+    tester,
+  ) async {
+    await openUnlocked(tester);
+
+    await tester.tap(find.byKey(const ValueKey('privacyPolicyButton')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PrivacyPolicyScreen), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(PrivacyPolicyScreen),
+        matching: find.text('Privacy policy'),
+      ),
+      findsOneWidget,
+    );
+    // The whole policy is one local string, so no route or asset can fail.
+    expect(find.textContaining('Argon2id'), findsOneWidget);
+    expect(find.textContaining('stikes.isfi@gmail.com'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(PrivacyPolicyScreen),
+        matching: find.byType(Scrollable),
+      ),
+      findsOneWidget,
+      reason: 'the policy must scroll on a phone',
+    );
   });
 
   testWidgets('a lock closes the licence page and Settings down to the auth '
