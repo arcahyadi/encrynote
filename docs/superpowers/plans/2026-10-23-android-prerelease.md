@@ -34,12 +34,12 @@
 
 **Interfaces:** Local signing properties `storeFile`, `storePassword`, `keyAlias`, `keyPassword`; release artifact `build/app/outputs/flutter-apk/app-release.apk`.
 
-- [ ] Add focused contract checks for an explicit release signing configuration, no release-to-debug fallback, and ignored signing inputs. Run the contract test to record a meaningful RED against the old Gradle configuration.
-- [ ] Load local signing properties, configure the release signer, and make missing/invalid signing configuration fail closed for release tasks without requiring secrets for debug builds. Preserve other Gradle settings.
-- [ ] Generate a long-lived RSA release key with Java keytool and strong random passwords using non-interactive secret handling. Set restrictive file permissions, check ignore behavior, and record only the public certificate fingerprint. Abort if files already exist.
-- [ ] Set `pubspec.yaml` to `1.0.0-dev.1+1`. Update README signing/development status, local setup/backup instructions and debug-install incompatibility warning; retain all existing safety/licensing text.
-- [ ] Run `flutter test test/project_contract_test.dart --no-uninstall`, then the full host suite and analyzer. Verify no-key release rejection and no-key debug configuration using isolated project-owned fixtures rather than moving or deleting real key files.
-- [ ] Inspect staged paths and commit only non-secret configuration, tests, version and documentation. Obtain a focused independent Kenari review and resolve material findings before publication.
+- [x] Add focused contract checks for an explicit release signing configuration, no release-to-debug fallback, and ignored signing inputs. Run the contract test to record a meaningful RED against the old Gradle configuration.
+- [x] Load local signing properties, configure the release signer, and make missing/invalid signing configuration fail closed for release tasks without requiring secrets for debug builds. Preserve other Gradle settings.
+- [x] Generate a long-lived RSA release key with Java keytool and strong random passwords using non-interactive secret handling. Set restrictive file permissions, check ignore behavior, and record only the public certificate fingerprint. Abort if files already exist.
+- [x] Set `pubspec.yaml` to `1.0.0-dev.1+1`. Update README signing/development status, local setup/backup instructions and debug-install incompatibility warning; retain all existing safety/licensing text.
+- [x] Run `flutter test test/project_contract_test.dart --no-uninstall`, then the full host suite and analyzer. Verify no-key release rejection and no-key debug configuration using isolated project-owned fixtures rather than moving or deleting real key files.
+- [x] Inspect staged paths and commit only non-secret configuration, tests, version and documentation. Obtain a focused independent Kenari review and resolve material findings before publication.
 
 ### Task 2: Verify and publish the APK
 
