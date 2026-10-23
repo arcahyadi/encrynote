@@ -309,6 +309,28 @@ void main() {
       }
     });
 
+    test('the licence summary invents no copyright holder', () {
+      final readme = source('README.md');
+      // The bundled NOTICES names Kirill Simonov for yaml; a name that is not
+      // in the shipped text must not be asserted here.
+      expect(readme.contains('Wagstaff'), isFalse);
+      expect(
+        RegExp(r'Kirill\s+Simonov.').hasMatch(readme),
+        isTrue,
+        reason: 'the yaml entry names Kirill Simonov in the bundled text',
+      );
+      expect(readme, contains('bundled NOTICES is authoritative'));
+    });
+
+    test('the native checks header names every archive round', () {
+      final checks = source('docs/testing/native-checks.md');
+      for (final round in ['fix1-*.log', 'fix2-', 'fix3-']) {
+        expect(checks, contains(round), reason: round);
+      }
+      // The drive flag claim is backed by archived help, not asserted bare.
+      expect(checks, contains('fix3-drive-help.log'));
+    });
+
     test('the licence page is reachable from settings', () {
       expect(
         source('lib/settings/settings_screen.dart'),
@@ -419,15 +441,39 @@ void main() {
       expectSafeCommands(source('README.md'), 'README.md');
     });
 
-    test('CONTRIBUTING test commands are safe', () {
-      expectSafeCommands(source('CONTRIBUTING.md'), 'CONTRIBUTING.md');
-    });
-
-    test('native-checks commands are safe', () {
-      expectSafeCommands(
-        source('docs/testing/native-checks.md'),
-        'docs/testing/native-checks.md',
+    test('every shipped markdown document is safe', () {
+      // The frozen plan is the one exemption, and only while it carries the
+      // checked safety-supersession note that makes its old commands
+      // subordinate to the current rule. Everything else must comply.
+      const frozenPlan =
+          'docs/superpowers/plans/2026-10-22-encrynote-implementation.md';
+      final documents = Directory(root)
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.md'))
+          .where((file) {
+            final path = file.path;
+            return !path.contains('/build/') &&
+                !path.contains('/.dart_tool/') &&
+                !path.contains('/.superpowers/') &&
+                !path.contains('/.git/');
+          })
+          .toList();
+      expect(
+        documents.map((file) => file.path.substring(root.length + 1)),
+        contains('docs/security/crypto-profile.md'),
+        reason: 'the scan must see the shipped docs, not an empty list',
       );
+      for (final file in documents) {
+        final relative = file.path.substring(root.length + 1);
+        final text = file.readAsStringSync();
+        if (relative == frozenPlan) {
+          expect(text, contains('Safety supersession'));
+          expect(text, contains('--no-uninstall'));
+          continue;
+        }
+        expectSafeCommands(text, relative);
+      }
     });
 
     test('integration test usage comments are safe', () {

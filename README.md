@@ -177,11 +177,11 @@ Transitive packages also ship code or native bindings in the bundles and are
 included in the same bundled NOTICES: `jni`, `jni_flutter`, `jni_util`,
 `objective_c`, `ffi`, `code_assets`, `hooks`, `path_provider_android`,
 `path_provider_foundation`, `crypto`, `collection`, `meta`, `logging`, `yaml`,
-`material_color_utilities`, and the rest of `pubspec.lock`. Their licence classes
-are BSD-3-Clause or Apache-2.0 (`material_color_utilities` is Apache-2.0);
-`yaml` is MIT with the Dart project and Kiri Wagstaff copyright lines. The exact
-text for each is in the bundled NOTICES page, and `pubspec.lock` is the pinned
-list.
+`material_color_utilities`, and the rest of `pubspec.lock`. Rather than restate
+each one here, the bundled NOTICES is authoritative: its `yaml` entry reads
+"Copyright (c) 2014, the Dart project authors. Copyright (c) 2006, Kirill
+Simonov." under MIT, and `material_color_utilities` is Apache-2.0 while the rest
+are BSD-3-Clause or Apache-2.0. `pubspec.lock` is the pinned list.
 
 `sky_engine` is SDK-vendored rather than a pub package and has **no** entry in
 the bundled NOTICES; it is not a separately distributed work here.

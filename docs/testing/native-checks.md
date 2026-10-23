@@ -4,10 +4,13 @@ This file records what was actually run for EnCryNote v1, on which device and
 build mode, and what was **not** run. A check that could not be performed is
 written as `Not run` with the reason — never as PASS.
 
-Records dated 2026-10-23 (fix round 1). Host: macOS 27.0.1 (arm64). Android:
-emulator `Medium_Phone_API_37.0`, Android 17 / API 37, arm64 (`emulator-5554`).
-Archived command output for each run below lives in
-`.superpowers/sdd/encrynote-20261022/` (`fix1-*.log`).
+Records dated 2026-10-23. Host: macOS 27.0.1 (arm64). Android: emulator
+`Medium_Phone_API_37.0`, Android 17 / API 37, arm64 (`emulator-5554`).
+Archived command output for each run lives in
+`.superpowers/sdd/encrynote-20261022/`: fix round 1 produced `fix1-*.log`, fix
+round 2 `fix2-*.log` (host-only doc/tooling work plus read-only artifact
+checks), and fix round 3 `fix3-*.log` (host-only doc/fixture work; no native
+runtime row was re-run).
 
 ## How to run each check
 
@@ -124,9 +127,10 @@ flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/encrynote_flow_test.dart -d <device-id> --profile
 ```
 
-`flutter drive` does not take `--no-uninstall`; it leaves the app installed.
-Still use an owned or disposable target with no personal vault, because it
-installs over the product application id.
+`flutter drive` has no uninstall flag at all (`flutter drive --help` lists none;
+archived in `fix3-drive-help.log`), so it leaves the app installed. It still
+installs over the product application id, so use an owned or disposable target
+with no personal vault.
 
 ### Android ↔ macOS export exchange
 
@@ -197,8 +201,10 @@ documentation and tooling only and deliberately re-ran no native tests.
 | Release APK target | — | release APK | `lib/main.dart` is the release entry point (build log) | `fix1-apk-build.log`, `fix1-release-target.log` |
 | Offline operation | Android emulator, airplane mode, `ping` unreachable | debug-JIT | Pass; connectivity restored afterwards | `fix1-offline.log` |
 | Integration-test uninstall default | macOS host, read-only help | — | `--[no-]uninstall` documented, `(defaults to on)` | `fix2-uninstall-help.log` |
-| Release policy helper | macOS host, no device | — | `POLICY=PASS checks=9`; fails closed on a missing artifact or SDK | `fix2-artifact-checks.log` |
-| Helper self-checks | macOS host | debug-JIT | 8 tests: clean pass plus 7 failing mutations | `fix2-tool-tests.log` |
+| `flutter drive` uninstall flag | macOS host, read-only help | — | no uninstall flag exists in `flutter drive --help` | `fix3-drive-help.log` |
+| Release policy helper | macOS host, no device | — | `POLICY=PASS checks=9`; fails closed on a missing artifact or SDK | `fix2-artifact-checks.log`, `fix3-artifact-checks.log` |
+| Helper self-checks | macOS host | debug-JIT | 10 tests: clean pass plus 9 failing mutations, on a stubbed JDK | `fix2-tool-tests.log`, `fix3-tool-tests.log` |
+| Document command-safety scan | macOS host | debug-JIT | every shipped markdown except the frozen plan carries `--no-uninstall` | `fix3-contract.log` |
 
 ## Not run, and why
 

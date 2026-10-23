@@ -181,11 +181,18 @@ across devices.
 
 ## Measured results
 
-Fix round 2 (single-isolate-per-operation code) re-ran the native checks; the
-numbers below are from the amended code.
+Fix round 2 (single-isolate-per-operation code, an earlier Task 1 cycle — not
+this document's fix round) re-ran the native checks; the numbers below are from
+the amended code.
 
-`flutter test integration_test/crypto_platform_test.dart -d macos` on macOS
-27.0.1 (arm64, debug build, 2026-10-22):
+Run every command below with `--no-uninstall`, on a device or emulator you own
+or can throw away that holds **no personal vault**. The test build reuses the
+product application id (`com.example.hello_flutter`), and `flutter test`
+uninstalls that package afterwards by default, which deletes its private data
+directory (`vault.enc`, `vault.previous`). See `docs/testing/native-checks.md`.
+
+`flutter test integration_test/crypto_platform_test.dart -d macos --no-uninstall`
+on macOS 27.0.1 (arm64, debug build, 2026-10-22):
 
 | Operation | Time |
 | --- | --- |
@@ -197,8 +204,9 @@ numbers below are from the amended code.
 | Longest event-loop stall during that 4 MiB seal | 8 ms |
 | Envelope size for the synthetic fixture | 1138 B |
 
-`flutter test integration_test/crypto_platform_test.dart -d emulator-5554`
-(Android 17 / API 37, arm64 emulator, debug build, amended code, two runs):
+`flutter test integration_test/crypto_platform_test.dart -d emulator-5554 \
+  --no-uninstall` (Android 17 / API 37, arm64 emulator, debug build, amended
+code, two runs):
 
 | Operation | Time |
 | --- | --- |

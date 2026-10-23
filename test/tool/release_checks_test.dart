@@ -96,6 +96,7 @@ E: data-extraction-rules (line=7)
           A: path="." (Raw: ".")
 ''',
     String entitlements = 'com.apple.security.app-sandbox com.apple.security.files.user-selected.read-write',
+    bool bundleNoticesValid = true,
   }) async {
     final dir = Directory(
       '${stubRoot.path}/fixture_${DateTime.now().microsecondsSinceEpoch}',
@@ -109,7 +110,10 @@ E: data-extraction-rules (line=7)
     )..createSync(recursive: true);
     final notices = <int>[];
     notices.addAll(gzip.encode(utf8.encode(_fakeNotices)));
-    File('${noticesDir.path}/NOTICES.Z').writeAsBytesSync(notices);
+    final bundleNotices = bundleNoticesValid
+        ? notices
+        : gzip.encode(utf8.encode('no licence text here'));
+    File('${noticesDir.path}/NOTICES.Z').writeAsBytesSync(bundleNotices);
     // A real zip, so the script's `unzip -p` of the notices asset works.
     File('${dir.path}/notices.z').writeAsBytesSync(notices);
     final zipSource = Directory(
@@ -193,6 +197,17 @@ $networkGrep
 ''');
     File('${dir.path}/backup_rules.txt').writeAsStringSync(backupRules);
     File('${dir.path}/extraction_rules.txt').writeAsStringSync(extractionRules);
+    // A valid stub JDK, so the self-check never silently uses a real
+    // Android Studio JBR. The stub records that it ran, which the test asserts.
+    final fakeJdk = Directory('${dir.path}/fake-jdk/bin')
+      ..createSync(recursive: true);
+    File('${fakeJdk.path}/java').writeAsStringSync('''
+#!/bin/sh
+echo "stub-java \$*" > "${dir.path}/java-ran.txt"
+echo 'openjdk version "99-stub"'
+''');
+    Process.runSync('chmod', ['+x', '${fakeJdk.path}/java']);
+
     File('${dir.path}/env.sh').writeAsStringSync('''
 export PATH="${bin.path}:/usr/bin:/bin:/usr/sbin:/sbin"
 export JAVA_HOME="${dir.path}/fake-jdk"
@@ -226,6 +241,18 @@ export ENCRYNOTE_APP="${dir.path}/EnCryNote.app"
       final result = await runScript(fixture);
       expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
       expect(result.stdout, contains('POLICY=PASS'));
+      // The stub JDK ran, so the self-check does not depend on a real Android
+      // Studio JBR being installed on the host.
+      expect(
+        File('${fixture.path}/java-ran.txt').existsSync(),
+        isTrue,
+        reason: 'the fixture must use its own java stub',
+      );
+      expect(
+        result.stdout,
+        contains('openjdk version "99-stub"'),
+        reason: 'the stub JDK must be the one used',
+      );
     },
   );
 
@@ -328,5 +355,40 @@ esac
     final result = await runScript(fixture);
     expect(result.exitCode, isNot(0));
     expect(result.stdout, isNot(contains('POLICY=PASS')));
+  });
+
+  test('a bundle notices asset without licence text fails the policy', () async {
+    // The APK copy is valid; only the macOS bundle's copy is broken. The policy
+    // must still fail, so the two copies are not interchangeable.
+    final fixture = await makeFixture(
+      toolsExist: true,
+      bundleNoticesValid: false,
+    );
+    final result = await runScript(fixture);
+    expect(result.exitCode, isNot(0));
+    expect(result.stdout, contains('POLICY=FAIL'));
+  });
+
+  test('a missing JDK fails closed even when the APK is valid', () async {
+    final fixture = await makeFixture(toolsExist: true);
+    // Point JAVA_HOME nowhere and take the Android Studio fallback away by
+    // hiding the stub, so no java can be found.
+    File('${fixture.path}/env.sh').writeAsStringSync('''
+export PATH="${fixture.path}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export JAVA_HOME="${fixture.path}/no-such-jdk"
+export ENCRYNOTE_ANDROID_HOME="${fixture.path}/android"
+export ENCRYNOTE_APK="${fixture.path}/app-release.apk"
+export ENCRYNOTE_APP="${fixture.path}/EnCryNote.app"
+''');
+    final result = await runScript(fixture);
+    // If the host has the Android Studio JBR, the script finds it and the run
+    // is expected to succeed; otherwise it must fail closed. Either way it may
+    // not report a policy pass through a broken JDK.
+    if (result.stdout.contains('openjdk')) {
+      expect(result.exitCode, 0);
+    } else {
+      expect(result.exitCode, isNot(0));
+      expect(result.stdout, isNot(contains('POLICY=PASS')));
+    }
   });
 }

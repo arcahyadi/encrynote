@@ -27,13 +27,6 @@ APK=${ENCRYNOTE_APK:-build/app/outputs/flutter-apk/app-release.apk}
 APP=${ENCRYNOTE_APP:-build/macos/Build/Products/Release/EnCryNote.app}
 ANDROID_HOME=${ENCRYNOTE_ANDROID_HOME:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}
 
-# The apkanalyzer launcher needs a JDK. An inherited JAVA_HOME may point at a JDK
-# that no longer exists, so use the Android Studio JBR unless it is valid.
-if [ ! -x "${JAVA_HOME:-}/bin/java" ]; then
-  JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-fi
-export JAVA_HOME
-
 fail() {
   echo "ERROR: $*" >&2
   exit 1
@@ -42,6 +35,16 @@ fail() {
 require() {
   command -v "$1" >/dev/null 2>&1 || fail "required tool not found on PATH: $1"
 }
+
+# The apkanalyzer launcher needs a JDK. An inherited JAVA_HOME may point at a JDK
+# that no longer exists, so fall back to the Android Studio JBR — but fail
+# closed if there is no usable java anywhere, rather than continuing without it.
+if [ ! -x "${JAVA_HOME:-}/bin/java" ]; then
+  JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+fi
+[ -x "$JAVA_HOME/bin/java" ] \
+  || fail "no usable java: set JAVA_HOME (tried '$JAVA_HOME')"
+export JAVA_HOME
 
 echo "JAVA_HOME=$JAVA_HOME"
 "$JAVA_HOME/bin/java" -version 2>&1 | head -1
@@ -120,20 +123,41 @@ plutil -p "$APP/Contents/Info.plist" | grep -E 'LSMinimumSystemVersion|CFBundleN
   || fail "Info.plist keys missing"
 
 echo "== bundled third-party notices"
-NOTICES=$(find "$APP/Contents/Frameworks" -name 'NOTICES*' 2>/dev/null | head -1 || true)
-[ -n "$NOTICES" ] || fail "no bundled NOTICES asset in $APP"
-ls -l "$NOTICES"
-NOTICES_TEXT=$(unzip -p "$APK" assets/flutter_assets/NOTICES.Z | python3 -c '
+APP_NOTICES=$(find "$APP/Contents/Frameworks" -name 'NOTICES*' 2>/dev/null | head -1 || true)
+[ -n "$APP_NOTICES" ] || fail "no bundled NOTICES asset in $APP"
+ls -l "$APP_NOTICES"
+
+# Read the licence text out of every notices asset this run can read: the APK's
+# compressed copy and the macOS bundle's copy. Nothing stands in for the other.
+# Both helpers read stdin and print "<chars> <cryptography> <apache>".
+notices_summary() {
+  # $1 = "zlib" for the .Z form, "plain" for text.
+  python3 -c '
 import sys, zlib
-text = zlib.decompress(sys.stdin.buffer.read(), 47).decode("utf-8", "replace")
-print(len(text))
-print("true" if "cryptography" in text else "false")
-print("true" if "Apache License" in text else "false")
-') || fail "could not read the bundled NOTICES asset"
-NOTICES_CHARS=$(printf '%s\n' "$NOTICES_TEXT" | sed -n 1p)
-NOTICES_CRYPTO=$(printf '%s\n' "$NOTICES_TEXT" | sed -n 2p)
-NOTICES_APACHE=$(printf '%s\n' "$NOTICES_TEXT" | sed -n 3p)
-echo "notices chars: $NOTICES_CHARS cryptography=$NOTICES_CRYPTO apache=$NOTICES_APACHE"
+raw = sys.stdin.buffer.read()
+text = (zlib.decompress(raw, 47) if sys.argv[1] == "zlib" else raw) \
+    .decode("utf-8", "replace")
+print(len(text), "true" if "cryptography" in text else "false",
+      "true" if "Apache License" in text else "false")
+' "$1"
+}
+
+APK_NOTICES_SUMMARY=$(unzip -p "$APK" assets/flutter_assets/NOTICES.Z \
+  | notices_summary zlib) || fail "could not read the APK notices asset"
+case "$APP_NOTICES" in
+  *.Z) APP_NOTICES_SUMMARY=$(notices_summary zlib < "$APP_NOTICES") ;;
+  *) APP_NOTICES_SUMMARY=$(notices_summary plain < "$APP_NOTICES") ;;
+esac || fail "could not read the bundle notices asset"
+APK_NOTICES_SUMMARY=$(printf '%s\n' "$APK_NOTICES_SUMMARY" | tr -s ' ')
+APP_NOTICES_SUMMARY=$(printf '%s\n' "$APP_NOTICES_SUMMARY" | tr -s ' ')
+echo "apk notices: $APK_NOTICES_SUMMARY"
+echo "app notices: $APP_NOTICES_SUMMARY"
+APK_NOTICES_CHARS=${APK_NOTICES_SUMMARY%% *}
+APP_NOTICES_CHARS=${APP_NOTICES_SUMMARY%% *}
+APK_NOTICES_CRYPTO=$(printf '%s\n' "$APK_NOTICES_SUMMARY" | awk '{print $2}')
+APK_NOTICES_APACHE=$(printf '%s\n' "$APK_NOTICES_SUMMARY" | awk '{print $3}')
+NOTICES_CRYPTO=$(printf '%s\n' "$APP_NOTICES_SUMMARY" | awk '{print $2}')
+NOTICES_APACHE=$(printf '%s\n' "$APP_NOTICES_SUMMARY" | awk '{print $3}')
 
 # --- policy ---------------------------------------------------------------
 FAILURES=0
@@ -196,9 +220,13 @@ sandbox_kept() {
 }
 
 notices_present() {
-  [ "${NOTICES_CRYPTO:-false}" = "true" ] &&
+  # Both shipped copies must carry the text, not just the APK's.
+  [ "${APK_NOTICES_CRYPTO:-false}" = "true" ] &&
+    [ "${APK_NOTICES_APACHE:-false}" = "true" ] &&
+    [ "${APK_NOTICES_CHARS:-0}" -gt 100000 ] &&
+    [ "${NOTICES_CRYPTO:-false}" = "true" ] &&
     [ "${NOTICES_APACHE:-false}" = "true" ] &&
-    [ "${NOTICES_CHARS:-0}" -gt 100000 ]
+    [ "${APP_NOTICES_CHARS:-0}" -gt 100000 ]
 }
 
 echo "== policy"
@@ -210,7 +238,7 @@ check "cloud-backup excludes every used domain" section_excludes_all "$EXTRACT_R
 check "device-transfer excludes every used domain" section_excludes_all "$EXTRACT_RULES" device-transfer
 check "sealed bundle has no network client/server entitlement" no_network_entitlement
 check "sealed bundle keeps sandbox and user-selected file access" sandbox_kept
-check "bundled notices carry the third-party licence texts" notices_present
+check "bundled notices carry the third-party licence texts in both bundles" notices_present
 
 if [ "$FAILURES" -ne 0 ]; then
   echo "POLICY=FAIL failures=$FAILURES"
