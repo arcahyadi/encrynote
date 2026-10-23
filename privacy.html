@@ -45,15 +45,16 @@ permission and contains no network code, so your notes cannot be sent
 anywhere.</p>
 
 <h2>Where your notes are stored</h2>
-<p>Notes are stored encrypted at rest in the app's private storage, using
-Argon2id to derive the key and AES-256-GCM to encrypt the vault. The app
-password and the three recovery questions and answers are chosen by you and
-are never transmitted.</p>
+<p>Notes are stored encrypted at rest in the app's private storage: a random
+32-byte data key encrypts the vault with AES-256-GCM, and a key derived from
+your password with Argon2id wraps that data key. The app password and the three
+recovery questions and answers are chosen by you and are never transmitted.</p>
 
 <h2>Recovery questions are readable</h2>
-<p>Recovery questions are stored as readable header text so they can be shown
-while the vault is locked. Anyone with access to the device can read them, so
-do not put secrets in the recovery questions.</p>
+<p>Recovery questions are stored as unencrypted header text in the vault file,
+which sits in the app's private storage, and the app shows them on the recovery
+screen to anyone who opens it, so do not put secrets in the recovery
+questions.</p>
 
 <h2>Import and export</h2>
 <ul>
@@ -61,8 +62,9 @@ do not put secrets in the recovery questions.</p>
   The original <code>.md</code> file outside the app stays plaintext and is not
   modified or deleted.</li>
   <li>Exporting notes creates an <code>.encrynote</code> file protected only by
-  the export password you choose. Recovery questions cannot open it, and a
-  forgotten export password cannot be recovered.</li>
+  the export password you choose, which derives that file's key with Argon2id
+  directly. Recovery questions cannot open it, and a forgotten export password
+  cannot be recovered.</li>
 </ul>
 
 <h2>Deleting your data</h2>
