@@ -16,9 +16,10 @@ code is MIT licensed — see [LICENSE](LICENSE) and
 - **Markdown notes.** Each note has a title and a body, edited in the **Write**
   tab and rendered in the **Preview** tab. Preview shows remote images as
   unavailable and never loads remote fonts, stylesheets, or other content.
-- **One encrypted vault.** The whole notebook is encrypted at rest with a key
-  derived by Argon2id and sealed with AES-256-GCM; a save replaces the vault and
-  keeps the previous generation for rollback.
+- **One encrypted vault.** The whole notebook is encrypted at rest with
+  AES-256-GCM under a random 32-byte data key; Argon2id-derived password and
+  recovery keys wrap that key rather than encrypting the notes directly. A save
+  replaces the vault and keeps the previous generation for rollback.
 - **Two ways in.** Unlock with the app password, or answer the three recovery
   questions chosen at setup. Cold start always starts locked.
 - **Auto-lock.** Lock the session immediately or after 1, 5, or 10 minutes of
