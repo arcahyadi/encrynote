@@ -1,13 +1,57 @@
 # EnCryNote
 
-A small, fully offline notebook for Android and macOS. Every note lives in one
-encrypted vault in the app's private directory (an active `vault.enc` plus the
-previous generation the store keeps for rollback); there is no account, no
-cloud, no telemetry, no network code, and no update check.
+EnCryNote is an offline, encrypted Markdown notebook for Android and macOS.
+Notes are written in Markdown, kept in a single password-protected vault in the
+app's private directory (an active `vault.enc` plus the previous generation the
+store keeps for rollback), and can be imported from or exported to files you
+choose. There is no account, no cloud sync, no telemetry, no network code, and
+no update check.
 
 The UI is English (source strings in `lib/l10n/app_en.arb`). The application
 code is MIT licensed — see [LICENSE](LICENSE) and
 [third-party licences](#third-party-licences).
+
+## What it does
+
+- **Markdown notes.** Each note has a title and a body, edited in the **Write**
+  tab and rendered in the **Preview** tab. Preview shows remote images as
+  unavailable and never loads remote fonts, stylesheets, or other content.
+- **One encrypted vault.** The whole notebook is encrypted at rest with a key
+  derived by Argon2id and sealed with AES-256-GCM; a save replaces the vault and
+  keeps the previous generation for rollback.
+- **Two ways in.** Unlock with the app password, or answer the three recovery
+  questions chosen at setup. Cold start always starts locked.
+- **Auto-lock.** Lock the session immediately or after 1, 5, or 10 minutes of
+  inactivity, and lock manually at any time.
+- **Import and export.** Import a plain `.md` file or an `.encrynote` export;
+  export the vault as an `.encrynote` file protected by its own password.
+
+## Platform status
+
+| Platform | Status |
+| --- | --- |
+| Android | Current development target; minimum SDK 24 (or Flutter's higher default) |
+| macOS | Current development target; deployment target macOS 12.0 |
+| iOS | Planned for a later version; not implemented in this repository |
+| Web, Windows, Linux | Not implemented |
+
+Android and macOS are the current development targets. Nothing here is a
+production or store release.
+
+## Basic usage
+
+1. **First launch.** Create a password of at least 8 characters, then enter
+   exactly three recovery questions and answers of your own. The questions are
+   stored as public header text so the recovery screen can show them while the
+   vault is locked; do not put secrets in them.
+2. **Write a note.** Choose **New note**, add a title, and switch between
+   **Write** and **Preview**.
+3. **Import.** Choose a `.md` file or an `.encrynote` export. An `.encrynote`
+   file needs the export password it was created with. A `.md` file needs no
+   password, but the original file outside EnCryNote stays plaintext.
+4. **Export.** Pick an export password. The export is protected by that
+   password only: the app password and recovery answers cannot open it, and a
+   forgotten export password cannot be recovered.
 
 ## Running it
 
