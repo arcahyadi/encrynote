@@ -209,7 +209,8 @@ the amended code.
 
 Run every command below with `--no-uninstall`, on a device or emulator you own
 or can throw away that holds **no personal vault**. The test build reuses the
-product application id (`com.example.hello_flutter`), and `flutter test`
+product application id (`io.github.arcahyadi.encrynote`; the runs recorded here
+used the prototype id `com.example.hello_flutter`), and `flutter test`
 uninstalls that package afterwards by default, which deletes its private data
 directory (`vault.enc`, `vault.previous`). See `docs/testing/native-checks.md`.
 

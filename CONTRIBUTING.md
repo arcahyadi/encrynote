@@ -50,7 +50,7 @@ flutter test
 - **Device integration runs must pass `--no-uninstall`** and must target a
   device or emulator you own or can throw away that holds **no personal vault**.
   The test build reuses the product application id
-  (`com.example.hello_flutter`), and `flutter test` uninstalls that package
+  (`io.github.arcahyadi.encrynote`), and `flutter test` uninstalls that package
   afterwards by default, which deletes its whole private data directory
   (`vault.enc`, `vault.previous`). A test-owned subdirectory inside the app does
   not protect a real vault from a package uninstall.

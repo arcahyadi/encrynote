@@ -95,7 +95,9 @@ sealed output must be archived with the run.
 that holds **no personal vault**, and always pass `--no-uninstall`.
 
 The test build reuses the product application id
-(`android/app/build.gradle.kts`: `applicationId = "com.example.hello_flutter"`).
+(`android/app/build.gradle.kts`: `applicationId = "io.github.arcahyadi.encrynote"`;
+runs recorded before 2026-10-23 used the prototype id
+`com.example.hello_flutter`).
 `flutter test` on an integration test installs that package and **uninstalls it
 afterwards by default** (`--uninstall` defaults to true; `flutter test --help`
 is the authority). Uninstalling a package deletes its whole private data

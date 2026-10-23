@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,6 +15,91 @@ void main() {
   String source(String path) => File('$root/$path').readAsStringSync();
 
   bool exists(String path) => File('$root/$path').existsSync();
+
+  /// The text from [opener] to its matching closing brace.
+  String block(String text, String opener) {
+    final start = text.indexOf(opener);
+    expect(start, isNonNegative, reason: '$opener must exist');
+    var depth = 0;
+    for (var i = start; i < text.length; i++) {
+      if (text[i] == '{') depth++;
+      if (text[i] == '}') {
+        depth--;
+        if (depth == 0) return text.substring(start, i + 1);
+      }
+    }
+    fail('$opener is not closed');
+  }
+
+  /// A PNG's IHDR facts and chunk names, read without adding an image package.
+  Map<String, dynamic> pngFacts(String path) {
+    final bytes = File('$root/$path').readAsBytesSync();
+    expect(bytes.take(8).toList(), [
+      0x89,
+      0x50,
+      0x4E,
+      0x47,
+      0x0D,
+      0x0A,
+      0x1A,
+      0x0A,
+    ], reason: '$path must be a PNG');
+    final chunks = <String>[];
+    int? width, height, bitDepth, colorType;
+    var offset = 8;
+    while (offset + 12 <= bytes.length) {
+      final length = ByteData.sublistView(
+        bytes,
+        offset,
+        offset + 4,
+      ).getUint32(0);
+      final type = String.fromCharCodes(bytes.sublist(offset + 4, offset + 8));
+      final dataStart = offset + 8;
+      expect(
+        dataStart + length + 4,
+        lessThanOrEqualTo(bytes.length),
+        reason: '$path: $type chunk overruns the file',
+      );
+      if (type == 'IHDR') {
+        final header = ByteData.sublistView(bytes, dataStart, dataStart + 13);
+        width = header.getUint32(0);
+        height = header.getUint32(4);
+        bitDepth = header.getUint8(8);
+        colorType = header.getUint8(9);
+      }
+      chunks.add(type);
+      offset = dataStart + length + 4;
+    }
+    expect(chunks.first, 'IHDR', reason: path);
+    expect(chunks.last, 'IEND', reason: path);
+    return {
+      'width': width,
+      'height': height,
+      'bitDepth': bitDepth,
+      'colorType': colorType,
+      'chunks': chunks,
+      'size': bytes.length,
+    };
+  }
+
+  void expectIconPng(String path, int dimension) {
+    final png = pngFacts(path);
+    expect(png['width'], dimension, reason: path);
+    expect(png['height'], dimension, reason: path);
+    // 8 bits per channel, RGBA: 32-bit PNG.
+    expect(png['bitDepth'], 8, reason: path);
+    expect(png['colorType'], 6, reason: '$path must be 32-bit RGBA');
+    expect((png['chunks'] as List), contains('sRGB'), reason: path);
+    // Nothing from the source document's metadata may ship in the icon.
+    expect(
+      (png['chunks'] as List).where(
+        (chunk) =>
+            const {'eXIf', 'tEXt', 'iTXt', 'zTXt', 'iCCP'}.contains(chunk),
+      ),
+      isEmpty,
+      reason: '$path must carry no EXIF or private metadata',
+    );
+  }
 
   late Map<String, dynamic> englishArb;
   late String mainManifest;
@@ -201,21 +287,6 @@ void main() {
       androidIgnore = source('android/.gitignore');
     });
 
-    /// The text from [opener] to its matching closing brace.
-    String block(String text, String opener) {
-      final start = text.indexOf(opener);
-      expect(start, isNonNegative, reason: '$opener must exist');
-      var depth = 0;
-      for (var i = start; i < text.length; i++) {
-        if (text[i] == '{') depth++;
-        if (text[i] == '}') {
-          depth--;
-          if (depth == 0) return text.substring(start, i + 1);
-        }
-      }
-      fail('$opener is not closed');
-    }
-
     test('the release build type signs with the local release key', () {
       final release = block(block(gradle, 'buildTypes {'), 'release {');
       expect(
@@ -265,6 +336,75 @@ void main() {
     test('signing inputs are ignored by git', () {
       expect(androidIgnore, contains('\nkey.properties'));
       expect(androidIgnore, contains('**/*.jks'));
+    });
+  });
+
+  group('Android product identity and icon', () {
+    late String gradle;
+    late String pubspec;
+
+    setUpAll(() {
+      gradle = source('android/app/build.gradle.kts');
+      pubspec = source('pubspec.yaml');
+    });
+
+    test('the installed application id is the approved Play identity', () {
+      final defaultConfig = block(gradle, 'defaultConfig {');
+      expect(
+        defaultConfig,
+        contains('applicationId = "io.github.arcahyadi.encrynote"'),
+      );
+      // The installed id changes; the private Kotlin namespace does not need to.
+      expect(gradle, contains('namespace = "com.example.hello_flutter"'));
+    });
+
+    test('the development version is the next pre-release', () {
+      expect(
+        RegExp(
+          r'^version: 1\.0\.0-dev\.2\+2$',
+          multiLine: true,
+        ).hasMatch(pubspec),
+        isTrue,
+        reason: 'pubspec.yaml must declare 1.0.0-dev.2+2',
+      );
+    });
+
+    test('the manifest keeps the launcher icon and the main activity', () {
+      expect(mainManifest, contains('android:icon="@mipmap/ic_launcher"'));
+      expect(mainManifest, contains('android:name=".MainActivity"'));
+      expect(
+        exists(
+          'android/app/src/main/kotlin/com/example/hello_flutter/MainActivity.kt',
+        ),
+        isTrue,
+      );
+    });
+
+    test('the canonical Play icon is a 512 square 32-bit sRGB PNG', () {
+      const path = 'assets/branding/encrynote-icon.png';
+      expect(exists(path), isTrue, reason: '$path must be committed');
+      expectIconPng(path, 512);
+      expect(
+        pngFacts(path)['size'] as int,
+        lessThanOrEqualTo(1024 * 1024),
+        reason: '$path must stay at or under 1024 KB',
+      );
+    });
+
+    test('the five launcher mipmaps use the icon size ladder', () {
+      const sizes = {
+        'mdpi': 48,
+        'hdpi': 72,
+        'xhdpi': 96,
+        'xxhdpi': 144,
+        'xxxhdpi': 192,
+      };
+      for (final entry in sizes.entries) {
+        expectIconPng(
+          'android/app/src/main/res/mipmap-${entry.key}/ic_launcher.png',
+          entry.value,
+        );
+      }
     });
   });
 
@@ -583,7 +723,7 @@ void main() {
         reason: 'the target must be owned/disposable',
       );
       // The product application id is shared, so say so.
-      expect(checks, contains('com.example.hello_flutter'));
+      expect(checks, contains('io.github.arcahyadi.encrynote'));
     });
 
     test('README warns that the device must hold no personal vault', () {

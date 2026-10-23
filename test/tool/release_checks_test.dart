@@ -35,8 +35,7 @@ void main() {
   /// A throwaway project layout plus stubs, so a failing tool can be simulated.
   Future<Directory> makeFixture({
     required bool toolsExist,
-    String permissions =
-        'com.example.hello_flutter.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+    String permissions = 'io.github.arcahyadi.encrynote.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
     String manifest = '''
         android:allowBackup="false"
         android:fullBackupContent="@ref/0x7f0e0000"
@@ -270,7 +269,7 @@ export ENCRYNOTE_APP="${dir.path}/EnCryNote.app"
   test('an INTERNET permission in the artifact fails the policy', () async {
     final fixture = await makeFixture(
       toolsExist: true,
-      permissions: 'com.example.hello_flutter.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION\nandroid.permission.INTERNET',
+      permissions: 'io.github.arcahyadi.encrynote.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION\nandroid.permission.INTERNET',
     );
     final result = await runScript(fixture);
     expect(result.exitCode, isNot(0));

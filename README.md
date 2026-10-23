@@ -37,8 +37,11 @@ code is MIT licensed — see [LICENSE](LICENSE) and
 | Web, Windows, Linux | Not implemented |
 
 Android and macOS are the current development targets. Nothing here is a
-production or store release. The Android development pre-release is version
-`1.0.0-dev.1+1` (Git tag `v1.0.0-dev.1`).
+production or store release. The current Android development version is
+`1.0.0-dev.2+2`; the published prototype pre-release `v1.0.0-dev.1+1` stays at
+package `com.example.hello_flutter`. The `1.0.0-dev.2+2` build installs as
+`io.github.arcahyadi.encrynote`, a **separate app** signed with the same local
+release key.
 
 ## Basic usage
 
@@ -77,7 +80,7 @@ flutter test integration_test/encrynote_flow_test.dart -d <device-id> --no-unins
 ```
 
 **Always pass `--no-uninstall` to an integration test on a device.** The test
-build uses the product application id (`com.example.hello_flutter`), and
+build uses the product application id (`io.github.arcahyadi.encrynote`), and
 `flutter test` uninstalls that package afterwards by default. Uninstalling
 deletes the app's private data directory, including `vault.enc` and
 `vault.previous` — so a run against a phone or emulator that holds a real vault
@@ -127,6 +130,15 @@ must be signed with this same key and use a higher Android version code
 (`+N` in `pubspec.yaml`); Android refuses an update signed by a different key.
 If the key is lost, an installed release build can only be replaced by
 uninstalling it first, which deletes the app's private data.
+
+**The Play package is a separate app, not an update.** The published prototype
+installs as `com.example.hello_flutter`; the `1.0.0-dev.2+2` build installs as
+`io.github.arcahyadi.encrynote`. Both are signed with this local key, but Android
+keeps each package's private data separate, so installing the new package does
+not move notes across and there is no automatic transfer. To carry notes over,
+export them to an `.encrynote` file from the old app and import that file in the
+new one; uninstalling the old package deletes its vault. The key stays the same
+for both, so the Play package's future updates must use it too.
 
 **Debug installs cannot be updated in place.** An app installed from a
 debug-signed build has a different certificate, so Android rejects the
