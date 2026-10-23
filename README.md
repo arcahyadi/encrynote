@@ -1,7 +1,8 @@
 # EnCryNote
 
 A small, fully offline notebook for Android and macOS. Every note lives in one
-encrypted vault file in the app's private directory; there is no account, no
+encrypted vault in the app's private directory (an active `vault.enc` plus the
+previous generation the store keeps for rollback); there is no account, no
 cloud, no telemetry, no network code, and no update check.
 
 The UI is English (source strings in `lib/l10n/app_en.arb`). The application
@@ -72,8 +73,10 @@ published release.
   and restored when a replacement fails. A change that never reached a
   successful commit — for example a full disk followed by a power loss — is not
   guaranteed to survive. A failed seal keeps the vault in RAM with the key so
-  the draft is not silently lost; the UI says so and keeps retrying until the
-  save succeeds. Do not treat "atomic" as "durable against every power loss".
+  the draft is not silently lost, and replaces the editor with a save-error
+  screen whose **Retry** button is the only way to try again: nothing retries
+  on a timer, so a draft stays unsaved until someone presses Retry. Do not
+  treat "atomic" as "durable against every power loss".
 
 ## Storage, sizes, and KDF
 
@@ -91,9 +94,10 @@ The v1 crypto profile is fixed and is not negotiated: Argon2id with 19456 KiB
 (19 MiB) of memory, 2 iterations, parallelism 1, 32-byte hash, a fresh 16-byte
 salt per wrapper; AES-256-GCM with a 32-byte key, a fresh 12-byte nonce per
 encryption, and a 16-byte tag. The parser accepts only this profile. The memory
-cost is deliberate: unlocking needs ~19 MiB of free RAM on top of the app, which
-is fine on the supported platforms but noticeable on a low-memory Android
-device under pressure.
+cost is deliberate: each unlock or recovery needs roughly 19 MiB of extra RAM
+while the KDF runs. It has only been measured on macOS and an Android emulator,
+never on a low-end phone, so it is **not approved for release** yet — see
+`docs/security/crypto-profile.md`, which also records the measured timings.
 
 `docs/security/crypto-profile.md` records the envelope layout, AAD domains, and
 measured timings.
@@ -101,10 +105,13 @@ measured timings.
 ## Platform notes
 
 - **Android:** minimum SDK 24 (or Flutter's higher default). Automatic backup
-  is disabled and both backup rule files exclude every app data domain, so the
-  vault is not copied by the OS. Device-to-device transfer is excluded too. A
-  backup that the OS or the user controls is outside the app's reach; any copy
-  the app writes itself is always ciphertext.
+  is disabled with `android:allowBackup="false"`, and the two rule files exclude
+  the five app data domains the app actually uses (`root`, `file`, `database`,
+  `sharedpref`, `external`) from legacy backup, cloud backup, and
+  device-to-device transfer. Device-protected storage domains are not listed
+  because the app never writes there; the manifest flag is the primary barrier.
+  A backup that the OS or the user controls is outside the app's reach; any
+  copy the app writes itself is always ciphertext.
 - **macOS:** deployment target macOS 12.0. The app runs sandboxed with only the
   user-selected file read/write entitlement; the release entitlement enables no
   network client or server.
@@ -118,8 +125,9 @@ measured timings.
 - While the app is unlocked, leaving it with **Immediately** selected locks it at
   once; the other options count from the last user interaction, including while
   the app is in the background. The native layer covers the window with an
-  opaque view while the app is not foregrounded so OS task snapshots do not
-  show notes.
+  opaque view while the app is not foregrounded. That cover is designed to keep
+  notes out of OS task snapshots, but the compositor's snapshot was not observed
+  on a device, so it is a design intent rather than a verified guarantee.
 - A failed save freezes edits, import, export, and credential changes until the
   sealed snapshot is written. The session keeps the key in memory for that
   retry — the UI says the change is not saved yet rather than pretending the
@@ -133,8 +141,16 @@ on which device and build mode, and which were not run.
 
 ## Third-party licences
 
-The app code is MIT. Dependencies keep their own licences; they are **not**
-relicensed as MIT.
+The app's own code is MIT (see [LICENSE](LICENSE)). Dependencies keep their own
+licences and are **not** relicensed as MIT.
+
+Every dependency's licence text is bundled into the build by the Flutter tool as
+the `NOTICES` asset (zipped to `NOTICES.Z` in release builds), which the engine
+registers with `LicenseRegistry`. The app shows that text in
+**Settings → Licences**, so a user of the built APK or `.app` can read the
+licences they are entitled to without a developer machine or the pub cache.
+
+Direct dependencies and their licences (versions pinned in `pubspec.lock`):
 
 | Package | Licence |
 | --- | --- |
@@ -145,10 +161,19 @@ relicensed as MIT.
 | `characters` | BSD-3-Clause (Dart project authors) |
 | `markdown` | BSD-3-Clause (Dart project authors) |
 | `intl` | BSD-3-Clause (Dart project authors) |
-| `cryptography` | Apache License 2.0 (Gohilla) |
-| `cupertino_icons` | MIT |
+| `cryptography` | Apache License 2.0 (dint-dev, `github.com/dint-dev/cryptography`) |
+| `cupertino_icons` | MIT (Vladimir Kharlampidi) |
 
-Full texts ship with each package in the pub cache (`~/.pub-cache/hosted/pub.dev/<package>/LICENSE`).
+Transitive packages also ship code or native bindings in the bundles and are
+included in the same bundled NOTICES: `jni`, `jni_flutter`, `jni_util`,
+`objective_c`, `ffi`, `code_assets`, `hooks`, `path_provider_android`,
+`path_provider_foundation`, `crypto`, `collection`, `meta`, `logging`, `yaml`
+(MIT, Dart project authors), `material_color_utilities` and `sky_engine`
+(Apache-2.0), and the rest of `pubspec.lock`. Their licence classes are
+BSD-3-Clause or Apache-2.0 except `yaml`, which is MIT. The exact text for each
+is in the bundled NOTICES page; `pubspec.lock` is the pinned list.
+
 The `cryptography` package's Apache-2.0 terms apply to that dependency's code
 only; its use here does not change the app's MIT licence or add Apache terms to
-EnCryNote's own source.
+EnCryNote's own source. Apache-2.0 §4's requirement to include a copy of the
+licence is met by the bundled NOTICES asset and the in-app licence page.

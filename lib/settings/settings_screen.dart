@@ -142,6 +142,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+              const Divider(height: 32),
+              ListTile(
+                key: const ValueKey('licensesButton'),
+                leading: const Icon(Icons.description_outlined),
+                title: Text(l10n.settingsLicensesButton),
+                // The standard Flutter page reads LicenseRegistry, which the
+                // engine fills from the bundled NOTICES asset, so every shipped
+                // dependency's text is readable inside the app.
+                onTap: () => showLicensePage(
+                  context: context,
+                  applicationName: l10n.appTitle,
+                  applicationVersion: '1.0.0',
+                ),
+              ),
             ],
           );
         },

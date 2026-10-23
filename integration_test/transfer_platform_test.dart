@@ -21,10 +21,10 @@ import '../test/support/fixtures.dart';
 ///
 /// The picker is a human-driven OS panel, so this test does not click it. It
 /// covers what can be checked without a person: the channel's refusal of an
-/// unknown handle, a bounded read through a real grant when one is provided by
-/// the environment, the vault write that follows an import, and the absence of a
-/// plaintext copy in the app's own directories. Cross-platform transfer needs
-/// two devices; see the task report for what was actually run.
+/// unknown handle, the vault write that follows an import, and the absence of a
+/// plaintext copy in the app's own directories. It does **not** read a real
+/// picked file or exercise the native size limit, so the bounded native reader
+/// remains unverified by automation; see `docs/testing/native-checks.md`.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   const native = MethodChannelNativeBridge();

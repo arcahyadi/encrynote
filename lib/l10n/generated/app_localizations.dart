@@ -508,6 +508,12 @@ abstract class AppLocalizations {
   /// **'A change is not saved yet. Auto-lock stays read-only until the save succeeds.'**
   String get settingsFrozenHint;
 
+  /// No description provided for @settingsLicensesButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Licences'**
+  String get settingsLicensesButton;
+
   /// No description provided for @settingsSaveFailed.
   ///
   /// In en, this message translates to:

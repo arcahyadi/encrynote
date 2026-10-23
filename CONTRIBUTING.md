@@ -112,4 +112,7 @@ password, or recovery answers. Do not test against data you do not own.
 
 By contributing you agree your contribution is licensed under the MIT licence in
 [LICENSE](LICENSE) as part of EnCryNote. Dependency licences are listed in the
-README and are not changed by this.
+README and are not changed by this. The build bundles every dependency's licence
+text as the `NOTICES` asset, shown in **Settings → Licences**; adding a
+dependency does not require editing that page, but check that its licence is
+compatible before you add it.

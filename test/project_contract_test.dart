@@ -68,6 +68,39 @@ void main() {
       );
     });
 
+    test('every locale keeps the template placeholders', () {
+      final arbFiles = Directory('$root/lib/l10n')
+          .listSync()
+          .whereType<File>()
+          .map((file) => file.uri.pathSegments.last)
+          .where((name) => name.startsWith('app_') && name.endsWith('.arb'));
+      final placeholder = RegExp(r'\{([a-zA-Z][a-zA-Z0-9_]*)\}');
+      final template = {
+        for (final entry in englishArb.entries)
+          if (!entry.key.startsWith('@') && entry.value is String)
+            entry.key: placeholder
+                .allMatches(entry.value as String)
+                .map((match) => match.group(1)!)
+                .toSet(),
+      };
+      for (final name in arbFiles) {
+        final arb =
+            jsonDecode(source('lib/l10n/$name')) as Map<String, dynamic>;
+        for (final entry in template.entries) {
+          final value = arb[entry.key];
+          expect(value, isA<String>(), reason: '$name: ${entry.key}');
+          expect(
+            placeholder
+                .allMatches(value as String)
+                .map((match) => match.group(1)!)
+                .toSet(),
+            entry.value,
+            reason: '$name: ${entry.key} must keep its placeholders',
+          );
+        }
+      }
+    });
+
     test('every ARB declares the locale its file name promises', () {
       final arbFiles = Directory('$root/lib/l10n')
           .listSync()
@@ -172,24 +205,74 @@ void main() {
       );
     });
 
-    test('both rule files exclude every app data domain', () {
-      for (final name in ['backup_rules.xml', 'data_extraction_rules.xml']) {
-        final rules = source('android/app/src/main/res/xml/$name');
-        for (final domain in [
-          'root',
-          'file',
-          'database',
-          'sharedpref',
-          'external',
-        ]) {
-          expect(
-            rules.contains('domain="$domain"'),
-            isTrue,
-            reason: '$name must exclude $domain',
-          );
-        }
-        expect(rules, contains('<exclude'));
-      }
+    /// The domains excluded inside one named section (or at the top level of
+    /// `<full-backup-content>` when [section] is null).
+    ///
+    /// A tiny section splitter instead of an XML dependency: the rule files are
+    /// ours, flat, and every assertion below is about which section owns which
+    /// `<exclude>`, which a file-wide `contains` cannot tell.
+    Set<String> excludedIn(String rules, String? section) {
+      final body = section == null
+          ? rules
+          : RegExp(
+              '<$section>(.*?)</$section>',
+              dotAll: true,
+            ).firstMatch(rules)?.group(1);
+      expect(body, isNotNull, reason: '$section must exist');
+      return RegExp(r'<exclude\s+domain="([a-z_]+)"')
+          .allMatches(body!)
+          .map((match) => match.group(1)!)
+          .toSet();
+    }
+
+    test('the legacy rules exclude every domain at the top level', () {
+      final rules = source('android/app/src/main/res/xml/backup_rules.xml');
+      expect(rules, contains('<full-backup-content>'));
+      expect(
+        excludedIn(rules, null),
+        containsAll(['root', 'file', 'database', 'sharedpref', 'external']),
+      );
+    });
+
+    test('cloud backup excludes every domain', () {
+      final rules = source(
+        'android/app/src/main/res/xml/data_extraction_rules.xml',
+      );
+      expect(rules, contains('<data-extraction-rules>'));
+      expect(
+        excludedIn(rules, 'cloud-backup'),
+        containsAll(['root', 'file', 'database', 'sharedpref', 'external']),
+      );
+    });
+
+    test('device transfer excludes every domain', () {
+      final rules = source(
+        'android/app/src/main/res/xml/data_extraction_rules.xml',
+      );
+      expect(
+        excludedIn(rules, 'device-transfer'),
+        containsAll(['root', 'file', 'database', 'sharedpref', 'external']),
+      );
+    });
+
+    test('deleting the device-transfer excludes is caught', () {
+      // The old whole-file `contains` check stayed green for exactly this
+      // mutation, because the same strings still exist under cloud-backup.
+      final original = source(
+        'android/app/src/main/res/xml/data_extraction_rules.xml',
+      );
+      final start = original.indexOf('<device-transfer>');
+      final end = original.indexOf('</device-transfer>');
+      expect(start, greaterThan(0));
+      expect(end, greaterThan(start));
+      final mutated =
+          '${original.substring(0, start)}'
+          '<device-transfer></device-transfer>'
+          '${original.substring(end + '</device-transfer>'.length)}';
+
+      expect(mutated, contains('domain="root"'));
+      expect(excludedIn(mutated, 'cloud-backup'), isNotEmpty);
+      expect(excludedIn(mutated, 'device-transfer'), isEmpty);
     });
   });
 
@@ -210,6 +293,46 @@ void main() {
         readme.contains('dependency licences are MIT'),
         isFalse,
         reason: 'dependencies keep their own licences',
+      );
+      // The bundle carries the texts, and the app can show them; a pub-cache
+      // path is not distribution.
+      expect(readme, contains('NOTICES'));
+      expect(readme, contains('Settings → Licences'));
+      expect(
+        readme.contains('~/.pub-cache'),
+        isFalse,
+        reason: 'the pub cache is not part of the distribution',
+      );
+      // Native/transitive packages that ship in the bundles are named.
+      for (final package in ['jni', 'objective_c', 'path_provider_android']) {
+        expect(readme.contains('`$package`'), isTrue, reason: package);
+      }
+    });
+
+    test('the licence page is reachable from settings', () {
+      expect(
+        source('lib/settings/settings_screen.dart'),
+        contains('showLicensePage'),
+      );
+      expect(
+        source('lib/settings/settings_screen.dart'),
+        contains("ValueKey('licensesButton')"),
+      );
+      expect(source('lib/l10n/app_en.arb'), contains('settingsLicensesButton'));
+    });
+
+    test('README describes the manual retry, not an automatic one', () {
+      final readme = source('README.md');
+      expect(readme, contains('Retry'));
+      expect(
+        readme.contains('keeps retrying'),
+        isFalse,
+        reason: 'retry is a button, not a loop',
+      );
+      expect(
+        RegExp(r'nothing retries\s+on a timer').hasMatch(readme),
+        isTrue,
+        reason: 'README must say nothing retries automatically',
       );
     });
 

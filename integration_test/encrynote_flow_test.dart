@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hello_flutter/platform/native_bridge.dart';
 import 'package:hello_flutter/session/note_session.dart';
@@ -24,9 +26,11 @@ import '../test/support/fixtures.dart';
 ///
 /// Cross-platform exchange (both directions):
 ///   1. Run on platform A; the log prints `EXCHANGE_EXPORT=<path>` and
-///      `EXCHANGE_EXPORT_BASE64=<artifact>`. A desktop path can be copied; an
-///      Android test app is uninstalled at the end, so use the base64 form and
-///      decode it into a test-owned file.
+///      `EXCHANGE_EXPORT_BASE64=<artifact>`. Copy the path when the host can
+///      reach the app's private directory; otherwise decode the base64 into a
+///      file the host can write (for example `/data/local/tmp/` via `adb push`).
+///      `flutter test` uninstalls the app afterwards by default, so the base64
+///      form is the reliable one to keep.
 ///   2. Copy that file to a test-owned path on platform B.
 ///   3. Run on B with
 ///      `--dart-define=ENCRYNOTE_IMPORT_ARTIFACT=<path>`
@@ -57,6 +61,7 @@ void main() {
   late Directory root;
   late Directory dir;
   late Directory exchangeDir;
+  late Directory cacheDir;
 
   Directory uniqueDir(String label) => Directory(
     '${root.path}/encrynote_flow_${label}_${pid}_'
@@ -69,18 +74,26 @@ void main() {
     root = await getApplicationSupportDirectory();
     dir = uniqueDir('a');
     await dir.create(recursive: true);
-    // The exchange artifact deliberately outlives the run: it is the file a
-    // person copies to the other platform. Only this run's own vault directory
-    // is deleted below; the printed exchange directory is left for the person
-    // (or `adb run-as`) to copy and remove.
+    // The exchange artifact outlives the test body only so the log can carry it
+    // to the other platform; tearDownAll removes it. Nothing is left behind.
     exchangeDir = uniqueDir('exchange');
     await exchangeDir.create(recursive: true);
+    // A cache directory this run owns, so the plaintext scan never reads the
+    // shared app cache (which the real app and other runs also use).
+    cacheDir = Directory(
+      '${(await getApplicationCacheDirectory()).path}/'
+      'encrynote_flow_cache_${pid}_'
+      '${DateTime.now().microsecondsSinceEpoch}',
+    );
+    await cacheDir.create(recursive: true);
     // ignore: avoid_print
     print('flow test directory: ${dir.path}');
   });
 
   tearDownAll(() async {
-    if (await dir.exists()) await dir.delete(recursive: true);
+    for (final owned in [dir, exchangeDir, cacheDir]) {
+      if (await owned.exists()) await owned.delete(recursive: true);
+    }
   });
 
   testWidgets(
@@ -244,9 +257,10 @@ void main() {
       expect(second.data!.notes.single.markdown, note.markdown);
 
       // --- hand the artifact to the other platform -----------------------
-      // A path is enough on a desktop. An Android test app is uninstalled when
-      // the run ends, so its private file cannot be pulled afterwards: the
-      // artifact is also printed as base64, which is transport, not a backdoor.
+      // The artifact is printed as base64 so a host that cannot reach the app's
+      // private directory (and after `flutter test` uninstalls the app) can
+      // still carry it to the other platform. It is ciphertext, and it is
+      // removed with this run's directories in tearDownAll.
       final exchangeBytes = await exportFile().readAsBytes();
       // ignore: avoid_print
       print('EXCHANGE_EXPORT=${exportFile().path}');
@@ -267,10 +281,10 @@ void main() {
   testWidgets('no note plaintext is left in the app private directories', (
     tester,
   ) async {
-    // Only this run's own directories are scanned: the support root also holds
-    // a developer's live vault, which this test must never read. The cache dir
-    // is where a careless implementation would drop a plaintext temporary file.
-    final roots = [dir, exchangeDir, await getApplicationCacheDirectory()];
+    // Only directories this run created are scanned: the support root also
+    // holds a developer's live vault, and the cache root is shared with the
+    // real app and other runs.
+    final roots = [dir, exchangeDir, cacheDir];
     final needles = [
       marker,
       'Fixture Note Title',
@@ -301,6 +315,25 @@ void main() {
     expect(scanned, greaterThan(0), reason: 'the vault files exist');
     // ignore: avoid_print
     print('PLAINTEXT_SCAN=ok files=$scanned');
+  });
+
+  testWidgets('the bundled notices asset carries third-party text', (
+    tester,
+  ) async {
+    // The test binding disables LicenseRegistry's collector on purpose, so read
+    // the asset the real ServicesBinding feeds it from. This proves the licence
+    // texts ship inside the running build, not only in the repository.
+    final bytes = await rootBundle.load('NOTICES.Z');
+    final text = await compute(
+      (Uint8List data) => utf8.decode(gzip.decode(data)),
+      bytes.buffer.asUint8List(),
+    );
+    expect(text, contains('Apache License'));
+    expect(text, contains('BSD'));
+    expect(text, contains('cryptography'));
+    expect(text, contains('jni'));
+    // ignore: avoid_print
+    print('LICENSES=ok chars=${text.length}');
   });
 
   testWidgets('an export made on the other platform imports here', (
@@ -364,6 +397,10 @@ void main() {
 
 /// The real native commit channel, with only the OS picker replaced by
 /// test-owned files in this run's private directory.
+///
+/// This is a test double: it proves the flow above the bridge, not the native
+/// streaming reader or the real selected-file grant. Those remain covered only
+/// by the platform integration suites' unknown-token refusal.
 class _ExchangeBridge implements NativeBridge {
   _ExchangeBridge({this.importPath, this.exportPath});
 
@@ -404,11 +441,21 @@ class _ExchangeBridge implements NativeBridge {
 
   @override
   Future<Uint8List> readImport(String token, {required int maxBytes}) async {
-    final bytes = await File(token).readAsBytes();
-    if (bytes.length > maxBytes) {
+    // Mirrors the native contract: the size is refused before the file is read
+    // whole, and the stream stops at the cap. This is a test double, not the
+    // real native grant path (which has no automated coverage here).
+    final file = File(token);
+    if (await file.length() > maxBytes) {
       throw const VaultException(FailureCode.limit, 'read.size');
     }
-    return bytes;
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in file.openRead()) {
+      builder.add(chunk);
+      if (builder.length > maxBytes) {
+        throw const VaultException(FailureCode.limit, 'read.size');
+      }
+    }
+    return builder.takeBytes();
   }
 
   @override

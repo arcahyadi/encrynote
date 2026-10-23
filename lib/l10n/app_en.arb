@@ -90,6 +90,7 @@
   "autoLockTenMinutes": "10 minutes",
   "settingsLockedHint": "Your vault is locked. Unlock to change this.",
   "settingsFrozenHint": "A change is not saved yet. Auto-lock stays read-only until the save succeeds.",
+  "settingsLicensesButton": "Licences",
   "settingsSaveFailed": "The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds.",
   "exportNotesButton": "Export notes",
   "importNotesButton": "Import notes",

@@ -235,6 +235,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'A change is not saved yet. Auto-lock stays read-only until the save succeeds.';
 
   @override
+  String get settingsLicensesButton => 'Licences';
+
+  @override
   String get settingsSaveFailed =>
       'The new auto-lock time is in effect but is not saved yet. It will apply again once the save succeeds.';
 
