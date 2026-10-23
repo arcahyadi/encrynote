@@ -49,3 +49,6 @@ app.*.map.json
 
 # Local execution reports
 .superpowers/sdd/
+
+# Local working docs
+/docs/
