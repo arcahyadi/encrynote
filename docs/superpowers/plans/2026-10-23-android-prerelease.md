@@ -47,8 +47,8 @@
 
 **Interfaces:** Tag `v1.0.0-dev.1` points at the verified source commit; release assets contain only the universal APK and checksum.
 
-- [ ] Build `flutter build apk --release --target=lib/main.dart`. Stop on failure; do not substitute a debug APK.
-- [ ] Use SDK tools to verify signature integrity, non-debug signer/certificate fingerprint, `debuggable=false`, version name/code, existing application id, minimum SDK, offline permissions/backup policy and bundled notices. Record exact output without signing secrets.
-- [ ] Name the APK `EnCryNote-1.0.0-dev.1-android-universal.apk` and calculate its SHA-256 checksum. Record tests, signing fingerprint, installation/update warning and outstanding validation in release notes.
-- [ ] Push reviewed source, create the immutable version tag, and publish a GitHub pre-release on `arcahyadi/encrynote` with only the APK and checksum. If a tag/release already exists, stop rather than overwrite it.
-- [ ] Verify remote tag/source identity, pre-release status and asset checksum/size. Report the download URL and local signing-backup paths, never their contents.
+- [x] Build `flutter build apk --release --target=lib/main.dart`. Stop on failure; do not substitute a debug APK.
+- [x] Use SDK tools to verify signature integrity, non-debug signer/certificate fingerprint, `debuggable=false`, version name/code, existing application id, minimum SDK, offline permissions/backup policy and bundled notices. Record exact output without signing secrets.
+- [x] Name the APK `EnCryNote-1.0.0-dev.1-android-universal.apk` and calculate its SHA-256 checksum. Record tests, signing fingerprint, installation/update warning and outstanding validation in release notes.
+- [x] Push reviewed source, create the immutable version tag, and publish a GitHub pre-release on `arcahyadi/encrynote` with only the APK and checksum. If a tag/release already exists, stop rather than overwrite it.
+- [x] Verify remote tag/source identity, pre-release status and asset checksum/size. Report the download URL and local signing-backup paths, never their contents.
