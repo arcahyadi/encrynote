@@ -50,6 +50,14 @@ class NoteSession extends ChangeNotifier {
   int? _pendingRevision;
 
   int _revision = 0;
+
+  /// Revision assigned to the newest accepted state.
+  ///
+  /// The pre-accept check and the seal both read this one value, so a draft
+  /// accepted while an earlier seal is still in flight is validated against the
+  /// revision the writer will actually use, never against a stale `_revision`.
+  int _acceptedRevision = 0;
+
   int _accepted = 0;
   int _sealedAt = 0;
   bool _failed = false;
@@ -152,6 +160,7 @@ class NoteSession extends ChangeNotifier {
         _accepted = 0;
         _sealedAt = 0;
         _revision = 0;
+        _acceptedRevision = 0;
         _failure = null;
         _failed = false;
         _lockRequested = false;
@@ -566,6 +575,10 @@ class NoteSession extends ChangeNotifier {
     }
     _data = before;
     _autoLock = before.autoLock;
+    // The withdrawn batch owned the newest revision; the restored state is the
+    // one accepted just before it, so its revision is exactly one lower. Keeping
+    // that number means the next accept checks the revision it will seal at.
+    _acceptedRevision--;
     if (_lockRequested) {
       _finishLock();
     } else {
@@ -604,11 +617,12 @@ class NoteSession extends ChangeNotifier {
 
   Future<void> _accept(VaultData next, {bool immediate = false}) {
     _requireMutable();
-    final revision = _revision + 1;
+    final revision = _acceptedRevision + 1;
     final vault = _vault!;
     // Reject before the draft enters state, so a rejected edit leaves the last
     // accepted value in place and never reaches the writer.
     _crypto.checkSnapshotFits(vault, next, revision);
+    _acceptedRevision = revision;
     _data = next;
     _autoLock = next.autoLock;
     _accepted++;
@@ -658,7 +672,11 @@ class NoteSession extends ChangeNotifier {
         // Capture the watermark before the seal awaits: an edit accepted during
         // the seal is not covered by these bytes, so it must stay behind.
         final sealedUpTo = _accepted;
-        final revision = _revision + 1;
+        // The revision this data was pre-checked at. Only the newest accepted
+        // state is sealed, and its check used this same value, so check and
+        // write agree even when the seal runs after an older commit advanced
+        // the committed revision.
+        final revision = _acceptedRevision;
         final Uint8List sealed;
         try {
           sealed = await _crypto.seal(vault, data, revision);
@@ -797,6 +815,7 @@ class NoteSession extends ChangeNotifier {
       _pendingRevision = null;
       _accepted = 0;
       _sealedAt = 0;
+      _acceptedRevision = 0;
       _failed = false;
       _uncertain = false;
       _lockRequested = false;
@@ -806,6 +825,7 @@ class NoteSession extends ChangeNotifier {
     }
     _vault = vault;
     _revision = vault.revision;
+    _acceptedRevision = vault.revision;
     _data = vault.data;
     _autoLock = vault.data.autoLock;
     _questions = _crypto.readRecoveryQuestions(vault.envelope);

@@ -223,4 +223,44 @@ void main() {
     expect(find.byType(LicensePage), findsOneWidget);
     expect(find.text('EnCryNote'), findsWidgets);
   });
+
+  testWidgets('a lock closes the licence page and Settings down to the auth '
+      'surface', (tester) async {
+    await io(tester, () async {
+      await File('${dir.path}/vault.enc').writeAsBytes(seed);
+      await session.load();
+      await session.unlock(localPassword);
+    });
+
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const Scaffold(body: Center(child: Text('auth surface'))),
+        routes: {
+          SettingsScreen.routeName: (_) => SettingsScreen(session: session),
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    navigator.currentState!.pushNamed(SettingsScreen.routeName);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('licensesButton')));
+    await tester.pumpAndSettle();
+    expect(find.byType(LicensePage), findsOneWidget);
+
+    await io(tester, () => session.lock());
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LicensePage), findsNothing);
+    expect(
+      find.text('Settings'),
+      findsNothing,
+      reason: 'Settings must not sit above the unlock surface',
+    );
+    expect(find.text('auth surface'), findsOneWidget);
+  });
 }

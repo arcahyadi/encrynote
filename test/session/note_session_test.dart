@@ -36,6 +36,36 @@ class _GatedCrypto extends VaultCrypto {
   }
 }
 
+/// Records the revision each pre-check validated and each seal wrote, so a test
+/// can prove the two agree for a draft accepted while a seal is in flight.
+class _RecordingCrypto extends VaultCrypto {
+  final List<int> checked = [];
+  final List<int> sealedAt = [];
+  Completer<void>? gate;
+  final Completer<void> entered = Completer<void>();
+
+  @override
+  void checkSnapshotFits(UnlockedVault vault, VaultData data, int revision) {
+    checked.add(revision);
+    super.checkSnapshotFits(vault, data, revision);
+  }
+
+  @override
+  Future<Uint8List> seal(
+    UnlockedVault vault,
+    VaultData data,
+    int revision,
+  ) async {
+    sealedAt.add(revision);
+    final open = gate;
+    if (open != null) {
+      if (!entered.isCompleted) entered.complete();
+      await open.future;
+    }
+    return super.seal(vault, data, revision);
+  }
+}
+
 /// Session tests keep scratch files inside the project and only delete the
 /// directory this test created. The encrypted seed is created once.
 void main() {
@@ -780,6 +810,126 @@ void main() {
     await gatedSession.lock();
     await gatedSession.unlock(localPassword);
     expect(gatedSession.data!.notes.single.markdown, 'second');
+  });
+
+  test('a draft accepted during a seal is validated at the revision the seal '
+      'writes', () async {
+    final recording = _RecordingCrypto();
+    final gatedSession = NoteSession(crypto: recording, store: store);
+    addTearDown(gatedSession.dispose);
+    await seedVault();
+    await gatedSession.load();
+    await gatedSession.unlock(localPassword);
+
+    recording.gate = Completer<void>();
+    final first = gatedSession.saveNote(
+      gatedSession.data!.notes.single.copyWith(markdown: 'first'),
+    );
+    await recording.entered.future;
+
+    final second = gatedSession.saveNote(
+      gatedSession.data!.notes.single.copyWith(markdown: 'second'),
+    );
+    recording.gate!.complete();
+    await Future.wait<void>([first, second]);
+
+    expect(
+      recording.sealedAt.last,
+      recording.checked.last,
+      reason:
+          'the revision the second seal wrote must be the revision its '
+          'pre-check validated (checked=${recording.checked}, '
+          'sealed=${recording.sealedAt})',
+    );
+  });
+
+  test('an exact-boundary draft accepted during a seal is rejected before '
+      'acceptance, not frozen or lost', () async {
+    final gated = _GatedCrypto();
+    final gatedSession = NoteSession(crypto: gated, store: store);
+    addTearDown(gatedSession.dispose);
+
+    Note note(String id, String markdown) => Note(
+      id: id,
+      title: 't',
+      markdown: markdown,
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+    );
+
+    // A real committed vault at revision 8, so the next seal crosses 9 -> 10.
+    final seedNote = note('a' * 32, 'seed');
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      VaultData(notes: [seedNote]),
+    );
+    await File('${dir.path}/vault.enc')
+        .writeAsBytes(await crypto.seal(created, created.data, 8), flush: true);
+    await gatedSession.load();
+    await gatedSession.unlock(localPassword);
+    expect(gatedSession.phase, SessionPhase.unlocked);
+
+    // Edit 1 is accepted; its revision-9 seal is held open.
+    gated.gate = Completer<void>();
+    final first = note('b' * 32, 'first');
+    final firstSave = gatedSession.saveNote(first);
+    unawaited(firstSave.catchError((Object _) {}));
+    final flush = gatedSession.flushSave();
+    await gated.entered.future;
+
+    // Edit 2 would make the payload exactly maxPayloadBytes at revision 9 and
+    // one byte too large at revision 10.
+    final secondId = 'c' * 32;
+    final probe = VaultData(notes: [seedNote, first, note(secondId, '')]);
+    final pad = maxPayloadBytes - v1PayloadBytes(probe, 9).length;
+    final second = note(secondId, 'z' * pad);
+    final exact = VaultData(notes: [seedNote, first, second]);
+    expect(v1PayloadBytes(exact, 9).length, maxPayloadBytes);
+    expect(
+      () => v1PayloadBytes(exact, 10),
+      throwsA(
+        isA<VaultException>().having((e) => e.code, 'code', FailureCode.limit),
+      ),
+    );
+
+    Object? secondError;
+    unawaited(
+      gatedSession
+          .saveNote(second)
+          .then((_) {}, onError: (Object error) => secondError = error),
+    );
+    await pumpEventQueue(times: 5);
+
+    expect(
+      gatedSession.phase,
+      SessionPhase.unlocked,
+      reason: 'an over-limit draft is rejected, not accepted into a dead end',
+    );
+    expect(gatedSession.failure, isNull);
+    expect(
+      gatedSession.data!.notes.any((existing) => existing.id == secondId),
+      isFalse,
+      reason: 'the rejected draft never enters session state',
+    );
+
+    gated.gate!.complete();
+    await flush;
+    await firstSave;
+    await pumpEventQueue(times: 5);
+    expect(secondError, isA<VaultException>());
+    expect(gatedSession.phase, SessionPhase.unlocked);
+
+    final onDisk = await crypto.unlock((await store.read())!, localPassword);
+    expect(onDisk.revision, 9);
+    expect(
+      onDisk.data.notes.any((existing) => existing.id == secondId),
+      isFalse,
+    );
+    expect(
+      onDisk.data.notes.any((existing) => existing.id == first.id),
+      isTrue,
+    );
   });
 
   test('a draft that would exceed the envelope limit is rejected before '

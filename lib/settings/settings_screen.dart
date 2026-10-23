@@ -45,7 +45,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// Settings is opened from the unlocked notes surface; once the vault is no
-  /// longer unlocked it must not sit above the auth screen.
+  /// longer unlocked it must not sit above the auth screen. Everything the
+  /// lock left above the auth surface goes too: the licence page is pushed on
+  /// top of Settings, so popping a single route would strand Settings.
   void _onSessionChanged() {
     if (_closing || !mounted || widget.session.phase == SessionPhase.unlocked) {
       return;
@@ -53,8 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _closing = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final navigator = Navigator.of(context);
-      if (navigator.canPop()) navigator.pop();
+      Navigator.of(context).popUntil((route) => route.isFirst);
     });
   }
 

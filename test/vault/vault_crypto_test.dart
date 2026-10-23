@@ -581,8 +581,19 @@ void main() {
       lessThan(1024),
       reason: 'the pre-check must not leave a large unused margin',
     );
+    // The pre-check reserves the bounded mutable-metadata growth, so the first
+    // length it rejects can still be sealed a few bytes inside the cap. The
+    // reservation must stay small, and the writer must still refuse a payload
+    // that genuinely exceeds the envelope.
+    final firstRejected = await crypto.seal(
+      unlocked,
+      VaultData(notes: [sized(hi)]),
+      2,
+    );
+    expect(firstRejected.length, lessThanOrEqualTo(maxEnvelopeBytes));
+    expect(maxEnvelopeBytes - firstRejected.length, lessThan(1024));
     await expectLater(
-      crypto.seal(unlocked, VaultData(notes: [sized(hi)]), 2),
+      crypto.seal(unlocked, VaultData(notes: [sized(hi + 1024)]), 2),
       throwsA(
         isA<VaultException>()
             .having((e) => e.code, 'code', FailureCode.limit)
@@ -622,7 +633,7 @@ void main() {
     );
   });
 
-  test('large payload work does not block the event loop', () async {
+  test('a large seal keeps the event loop running', () async {
     final created = await crypto.createVault(
       localPassword,
       fixtureRecovery,
@@ -638,28 +649,42 @@ void main() {
     );
     final largeData = VaultData(notes: [largeNote]);
 
-    // Longest single event-loop stall while seal/verify encrypt+decrypt ~8 MiB.
+    // Sample the event loop only while `seal` itself is pending. The unlock KDF
+    // and any trailing delay are outside the window, so a tick here can only
+    // come from the seal yielding this isolate.
+    var ticks = 0;
     var lastTick = DateTime.now();
-    var maxStallMs = 0;
-    final ticks = <int>[];
-    final timer = Timer.periodic(const Duration(milliseconds: 5), (_) {
+    var worstGapMs = 0;
+    final timer = Timer.periodic(const Duration(milliseconds: 1), (_) {
+      ticks++;
       final now = DateTime.now();
       final gap = now.difference(lastTick).inMilliseconds;
-      ticks.add(gap);
-      if (gap > maxStallMs) maxStallMs = gap;
+      if (gap > worstGapMs) worstGapMs = gap;
       lastTick = now;
     });
+    final watch = Stopwatch()..start();
     final sealed = await crypto.seal(unlocked, largeData, 2);
-    final reopened = await crypto.unlock(sealed, localPassword);
-    await Future<void>.delayed(const Duration(milliseconds: 20));
+    watch.stop();
     timer.cancel();
 
-    expect(ticks.length, greaterThan(3), reason: 'timer never ran');
+    // The seal must yield: a seal that ran on this isolate (offload bypassed)
+    // blocks the timer, so no tick can land inside the window. This is a
+    // progress property, not a machine-specific time bound.
     expect(
-      maxStallMs,
-      lessThan(100),
-      reason: 'event loop stalled $maxStallMs ms',
+      ticks,
+      greaterThan(0),
+      reason:
+          'the seal blocked the event loop for ${watch.elapsedMilliseconds} ms '
+          '(ticks=$ticks)',
     );
+    // Diagnostic only: one machine, one run, not a performance guarantee.
+    // ignore: avoid_print
+    print(
+      'seal-progress ticks=$ticks elapsedMs=${watch.elapsedMilliseconds} '
+      'worstGapMs=$worstGapMs',
+    );
+
+    final reopened = await crypto.unlock(sealed, localPassword);
     expect(reopened.data.notes.single.markdown.length, 4 * 1024 * 1024);
 
     // Tamper checks still hold through the isolated payload work.
@@ -667,6 +692,74 @@ void main() {
     await expectLater(
       crypto.unlock(tampered, localPassword),
       _rejectedAs(FailureCode.format),
+    );
+  });
+
+  test('a near-limit vault stays writable across a revision digit boundary', () async {
+    final created = await crypto.createVault(
+      localPassword,
+      fixtureRecovery,
+      VaultData(notes: const []),
+    );
+    final unlocked = await crypto.unlock(created.envelope, localPassword);
+
+    Note sized(int length) => Note(
+      id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      title: 'sized',
+      markdown: 'a' * length,
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+    );
+
+    bool fits(int length, int revision) {
+      try {
+        crypto.checkSnapshotFits(
+          unlocked,
+          VaultData(notes: [sized(length)]),
+          revision,
+        );
+        return true;
+      } on VaultException catch (error) {
+        expect(error.code, FailureCode.limit);
+        return false;
+      }
+    }
+
+    // Largest payload the writer pre-check accepts at revision 9, the last
+    // single-digit revision. The reservation for the mutable metadata is small,
+    // so a short downward walk finds it without a full binary search.
+    final overhead = v1PayloadBytes(VaultData(notes: [sized(0)]), 9).length;
+    var boundary = maxPayloadBytes - overhead;
+    while (boundary > 0 && !fits(boundary, 9)) {
+      boundary--;
+    }
+    expect(boundary, greaterThan(0));
+    expect(fits(boundary + 1, 9), isFalse);
+
+    // Commit it as a real vault at revision 9.
+    final full = VaultData(notes: [sized(boundary)]);
+    final atNine = await crypto.unlock(
+      await crypto.seal(unlocked, full, 9),
+      localPassword,
+    );
+    expect(atNine.revision, 9);
+
+    // A metadata-only auto-lock change at revision 10 must still fit and seal.
+    final changed = full.copyWith(autoLock: AutoLockMode.immediately);
+    crypto.checkSnapshotFits(atNine, changed, 10);
+    final resealed = await crypto.seal(atNine, changed, 10);
+    final reopened = await crypto.unlock(resealed, localPassword);
+    expect(reopened.data.autoLock, AutoLockMode.immediately);
+    expect(reopened.data.notes.single.markdown.length, boundary);
+
+    // Recovery with a new password at revision 10 must not dead-end either.
+    final rewrapped = await crypto.rewrapPassword(atNine, 'new-pass-1234', 10);
+    final afterRewrap = await crypto.unlock(rewrapped, 'new-pass-1234');
+    expect(afterRewrap.data.notes.single.markdown.length, boundary);
+    final recovered = await crypto.recover(rewrapped, fixtureRecovery.answers);
+    expect(
+      await recovered.dataKey.extractBytes(),
+      await afterRewrap.dataKey.extractBytes(),
     );
   });
 

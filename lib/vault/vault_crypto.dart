@@ -22,6 +22,18 @@ const int _nonceLength = 12;
 const int _tagLength = 16;
 const int _dataKeyLength = 32;
 
+/// Largest revision the writer will mint. The payload pre-check reserves the
+/// serialized width this field can still grow by, so an accepted vault stays
+/// writable when the revision crosses a decimal digit (9 -> 10).
+const int _maxRevisionDigits = 10;
+
+/// Longest possible `autoLock` storage value. A preference change is metadata
+/// only, but it still grows the payload, so the pre-check reserves the same
+/// headroom for it.
+final int _maxAutoLockBytes = AutoLockMode.values
+    .map((mode) => mode.storageValue.length)
+    .reduce((a, b) => a > b ? a : b);
+
 const String _domainPayload = 'encrynote/local-payload';
 const String _domainPasswordWrap = 'encrynote/password-wrap';
 const String _domainRecoveryWrap = 'encrynote/recovery-wrap';
@@ -153,9 +165,19 @@ class VaultCrypto {
   ///
   /// The envelope length is measured against [vault]'s own header and wrappers,
   /// which are the ones [seal] re-emits unchanged.
+  ///
+  /// The check also reserves the bounded growth of the two mutable metadata
+  /// fields (`revision` digits and the `autoLock` value), so a vault accepted
+  /// at this boundary can still take a later metadata-only change or a password
+  /// rewrap when the revision crosses a decimal digit. The wire caps themselves
+  /// do not change: this only keeps the writer away from the edge.
   void checkSnapshotFits(UnlockedVault vault, VaultData data, int revision) {
     final plain = v1PayloadBytes(data, revision);
-    if (_envelopeLengthFor(vault.envelope, plain.length) > maxEnvelopeBytes) {
+    final reserved = plain.length + _metadataGrowth(data, revision);
+    if (reserved > maxPayloadBytes) {
+      throw const VaultException(FailureCode.limit, 'payload');
+    }
+    if (_envelopeLengthFor(vault.envelope, reserved) > maxEnvelopeBytes) {
       throw const VaultException(FailureCode.limit, 'envelope');
     }
   }
@@ -270,6 +292,16 @@ Uint8List v1PayloadBytes(VaultData data, int revision) {
   }
   return plain;
 }
+
+/// Bytes the mutable metadata can still gain at its documented maxima.
+///
+/// Used by [VaultCrypto.checkSnapshotFits] to reserve headroom: JSON length
+/// grows by exactly one byte per extra `revision` digit and per extra
+/// `autoLock` character, and both are bounded ([_maxRevisionDigits],
+/// [_maxAutoLockBytes]).
+int _metadataGrowth(VaultData data, int revision) =>
+    max(0, _maxRevisionDigits - revision.toString().length) +
+    max(0, _maxAutoLockBytes - data.autoLock.storageValue.length);
 
 typedef _Opened = ({Uint8List dataKey, Map<String, dynamic> json});
 
